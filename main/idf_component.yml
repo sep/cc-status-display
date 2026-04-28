@@ -1,0 +1,5 @@
+dependencies:
+  idf:
+    version: '>=5.0'
+  esphome/esp-hub75: ^0.3.6
+  espressif/cjson: ^1.7.19

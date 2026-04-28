@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claude-status — flash your board</title>
+  <link rel="stylesheet" href="style.css">
+  <script
+    type="module"
+    src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+  ></script>
+</head>
+<body>
+  <header>
+    <h1>claude-status</h1>
+    <p class="tagline">A HUB75 LED panel that shows what your Claude Code session is doing — live.</p>
+  </header>
+
+  <section class="intro">
+    <p>
+      Plug a supported ESP32-S3 dev board into your computer with USB-C, pick the
+      board below, hit <strong>Flash</strong>. Once flashed, wire the panel
+      following that board's pinout page, supply 5&nbsp;V to the panel, and run
+      the bridge on your host.
+    </p>
+  </section>
+
+  <section class="boards-section">
+    <h2>Supported boards</h2>
+
+    <article class="board">
+      <h3>SparkFun Thing Plus ESP32-S3</h3>
+      <p>
+        The original development board for this project. Compact, Qwiic
+        connector, microSD slot. HUB75 pins are split across both headers.
+      </p>
+      <div class="actions">
+        <esp-web-install-button manifest="firmware/thing_plus/manifest.json">
+          <button slot="activate">Flash Thing Plus</button>
+          <span slot="unsupported">Your browser doesn't support WebSerial. Try Chrome, Edge, or another Chromium-based browser.</span>
+          <span slot="not-allowed">WebSerial requires HTTPS. Make sure you're on https://.</span>
+        </esp-web-install-button>
+        <a class="docs-link" href="boards/thing_plus.html">Wiring &amp; pinout →</a>
+      </div>
+    </article>
+
+    <article class="board">
+      <h3>Lonely Binary ESP32-S3 N16R8 Gold Edition</h3>
+      <p>
+        16&nbsp;MB Flash, 8&nbsp;MB octal PSRAM. All HUB75 pins live on the left
+        header, GPIO&nbsp;4–16 contiguous — a clean ribbon layout.
+      </p>
+      <div class="actions">
+        <esp-web-install-button manifest="firmware/lonely_binary_n16r8/manifest.json">
+          <button slot="activate">Flash Lonely Binary</button>
+          <span slot="unsupported">Your browser doesn't support WebSerial. Try Chrome, Edge, or another Chromium-based browser.</span>
+          <span slot="not-allowed">WebSerial requires HTTPS. Make sure you're on https://.</span>
+        </esp-web-install-button>
+        <a class="docs-link" href="boards/lonely_binary_n16r8.html">Wiring &amp; pinout →</a>
+      </div>
+    </article>
+  </section>
+
+  <section class="notes">
+    <h2>Browser support</h2>
+    <p>
+      Web flashing uses <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API">WebSerial</a>,
+      which is supported in <strong>Chrome, Edge, and other Chromium-based browsers</strong>.
+      Firefox and Safari don't support WebSerial; for those browsers, use
+      <a href="https://docs.espressif.com/projects/esptool/en/latest/esp32s3/installation.html">esptool</a> directly with the
+      <code>.tar.gz</code> archives attached to each release.
+    </p>
+  </section>
+
+  <footer>
+    <p>
+      Source code: <a href="https://github.com/sep/cc-status-display">github.com/sep/cc-status-display</a> ·
+      <a href="https://github.com/sep/cc-status-display/blob/main/FIRMWARE.md">Wire-protocol spec</a>
+    </p>
+  </footer>
+</body>
+</html>

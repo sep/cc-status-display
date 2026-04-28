@@ -1,0 +1,112 @@
+name: Release
+
+# Triggered when a semver tag is pushed (e.g. `git tag v1.2.0 && git push --tags`).
+# Builds one firmware per supported board, deploys the flasher site to GitHub
+# Pages, and creates a GitHub Release with the binaries attached.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Single concurrent release at a time — tag pushes are infrequent and we
+# don't want a race between two tag pushes both deploying to Pages.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build firmware (${{ matrix.board.id }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - id: thing_plus
+            macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+          - id: lonely_binary_n16r8
+            macro: BOARD_LONELY_BINARY_N16R8_GOLD
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32s3
+          path: '.'
+          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}
+
+      - name: Stage binaries
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp build/bootloader/bootloader.bin out/bootloader.bin
+          cp build/partition_table/partition-table.bin out/partition-table.bin
+          # The app .bin is the only top-level .bin in build/. Its name
+          # tracks the project() in CMakeLists.txt; rename to firmware.bin
+          # for a stable manifest reference.
+          APP_BIN=$(ls build/*.bin | head -n 1)
+          cp "$APP_BIN" out/firmware.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board.id }}
+          path: out/
+
+  publish:
+    name: Publish site + release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create the GitHub Release
+      pages: write      # to deploy GitHub Pages
+      id-token: write   # OIDC for the Pages deploy
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Stage GitHub Pages site
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp -r docs/site/* _site/
+          for board_id in thing_plus lonely_binary_n16r8; do
+            mkdir -p "_site/firmware/$board_id"
+            cp artifacts/firmware-$board_id/*.bin "_site/firmware/$board_id/"
+            python3 scripts/make_manifest.py \
+              --board-id "$board_id" \
+              --version "${GITHUB_REF_NAME}" \
+              > "_site/firmware/$board_id/manifest.json"
+          done
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy-pages
+        uses: actions/deploy-pages@v4
+
+      - name: Stage release tarballs
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          for board_id in thing_plus lonely_binary_n16r8; do
+            tar -czf "release/${board_id}-${GITHUB_REF_NAME}.tar.gz" \
+              -C "artifacts/firmware-$board_id" .
+          done
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.tar.gz
+          generate_release_notes: true

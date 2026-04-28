@@ -1,0 +1,31 @@
+---
+# Layout-only style for claude-status. Naming conventions live in
+# CONVENTIONS.md (clang-tidy isn't enforcing them right now — vendor
+# APIs we interface with use foreign conventions and naming linters
+# fight that constantly).
+Language: Cpp
+BasedOnStyle: LLVM
+
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+AccessModifierOffset: -1
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+
+SpacesBeforeTrailingComments: 2
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# We do `if (x) y;` pretty often.
+AllowShortBlocksOnASingleLine: Empty

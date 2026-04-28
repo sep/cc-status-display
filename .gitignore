@@ -1,0 +1,24 @@
+## ESP-IDF build artifacts
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+
+## CI staging dirs (release.yml uses these)
+_site/
+artifacts/
+release/
+out/
+
+## Per-developer ESP-IDF install paths
+eim_config.toml
+
+## IDE / editor / tooling caches
+.idea/
+.cache/
+cmake-build-debug/
+cmake-build-debug-esp-idf/
+
+## Local Claude Code per-project state
+.claude/

@@ -1,0 +1,24 @@
+CompileFlags:
+  CompilationDatabase: build
+  Remove:
+    - -fno-shrink-wrap
+    - -fno-tree-switch-conversion
+    - -fstrict-volatile-bitfields
+    - -mtext-section-literals
+    - -mlongcalls
+    - -fno-jump-tables
+    - -fno-printf-return-value
+    - -free
+    - -fstack-protector*
+  Add:
+    - --target=xtensa
+    - --sysroot=/Users/rmrogers/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf
+    - -isystem/Users/rmrogers/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf/include
+    - -isystem/Users/rmrogers/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include
+    - -isystem/Users/rmrogers/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf/include/c++/15.2.0
+    - -isystem/Users/rmrogers/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/xtensa-esp-elf/include/c++/15.2.0/xtensa-esp-elf
+
+Diagnostics:
+  Suppress:
+    - drv_unknown_argument
+    - c99-designator
