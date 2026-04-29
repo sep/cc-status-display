@@ -1,0 +1,80 @@
+name: ESP-IDF forward canary
+
+# Proactive safety net: when Espressif tags a newer ESP-IDF release than
+# the version this project is currently pinned to, build the firmware
+# against that newer version and report success/failure.
+#
+# This intentionally runs against tagged stable releases only — building
+# against the master/dev branch would be more noise than signal. The
+# job short-circuits when the latest ESP-IDF release == our pinned
+# version, so weekly runs are no-ops until something new ships.
+#
+# A green run means the new IDF version works for us; we can bump
+# release.yml's pinned version with confidence. A red run means
+# migration work is needed before bumping. Either way, GitHub's
+# default workflow-failure email serves as the notification channel.
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"  # Mondays 10:00 UTC (after smoke build)
+  workflow_dispatch:
+
+concurrency:
+  group: idf-canary
+  cancel-in-progress: true
+
+# The version this project is currently pinned to. Kept in sync with the
+# `esp_idf_version:` in release.yml and smoke.yml — when those bump, bump
+# this too. Centralized here so the canary's comparison is unambiguous.
+env:
+  PINNED_IDF_VERSION: "v6.0"
+
+jobs:
+  detect:
+    name: Check for newer ESP-IDF release
+    runs-on: ubuntu-latest
+    outputs:
+      latest:    ${{ steps.lookup.outputs.latest }}
+      should_run: ${{ steps.lookup.outputs.should_run }}
+    steps:
+      - id: lookup
+        run: |
+          set -euo pipefail
+          LATEST=$(curl -sfL \
+            "https://api.github.com/repos/espressif/esp-idf/releases/latest" \
+            | jq -r .tag_name)
+          echo "Latest ESP-IDF release: $LATEST"
+          echo "Pinned in this repo:    $PINNED_IDF_VERSION"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if [ "$LATEST" = "$PINNED_IDF_VERSION" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ESP-IDF $LATEST matches our pin — no canary build needed."
+          else
+            echo "should_run=true"  >> "$GITHUB_OUTPUT"
+            echo "::notice::ESP-IDF $LATEST is newer than our pin ($PINNED_IDF_VERSION) — running canary build."
+          fi
+
+  canary:
+    name: Build vs ${{ needs.detect.outputs.latest }} (${{ matrix.board.id }})
+    needs: detect
+    if: needs.detect.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - id: thing_plus
+            macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+          - id: lonely_binary_n16r8
+            macro: BOARD_LONELY_BINARY_N16R8_GOLD
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: recursive
+
+      - uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
+        with:
+          esp_idf_version: ${{ needs.detect.outputs.latest }}
+          target: esp32s3
+          path: '.'
+          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}

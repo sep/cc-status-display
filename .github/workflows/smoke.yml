@@ -1,0 +1,44 @@
+name: Smoke build (weekly)
+
+# Reactive safety net: rebuild on the currently-pinned ESP-IDF version,
+# managed components, and Action SHAs. If anything in the supply chain
+# breaks (a managed-component registry hiccup, a transitive dependency
+# disappearing, etc.), this fires red mail before a user hits it. No
+# release artifacts are produced — this is purely a "does it still
+# compile" canary on current pins.
+#
+# Distinct from idf-canary.yml, which builds against *newer* ESP-IDF
+# versions to catch forward-incompatibility.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Mondays 09:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: smoke
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Smoke (${{ matrix.board.id }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - id: thing_plus
+            macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+          - id: lonely_binary_n16r8
+            macro: BOARD_LONELY_BINARY_N16R8_GOLD
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: recursive
+
+      - uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
+        with:
+          esp_idf_version: v6.0
+          target: esp32s3
+          path: '.'
+          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}

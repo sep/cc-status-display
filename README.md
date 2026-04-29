@@ -40,6 +40,9 @@ Supported boards as of v1.2:
   you're touching the serial path.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — coding conventions, how to add a new
   board, how to add a new state.
+- [`MAINTENANCE.md`](MAINTENANCE.md) — every external dependency, how it's
+  pinned, where to watch for upstream changes, and how to bump. Read this
+  first when picking the project back up after months away.
 - [`main/`](main/) — firmware source. Single-binary ESP-IDF v6.0 project.
 
 ### Local build & flash

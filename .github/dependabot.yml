@@ -1,0 +1,20 @@
+version: 2
+
+# All workflow actions are pinned to commit SHAs (not tags) for supply-chain
+# security. Dependabot rewrites both the SHA and the trailing version comment
+# when bumping. Cadence is weekly so updates accumulate into one PR rather
+# than one per action per release.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Indiana/Indianapolis"
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
