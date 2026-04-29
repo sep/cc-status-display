@@ -590,15 +590,17 @@ Likely future `type`-dispatched commands:
 
 ## 11. Pointers to the other halves
 
-- Plugin (hooks + broker, Python): `/mnt/w/sep/claude-status/` in the WSL
-  side of the dev environment. The relevant source files are
-  `bin/broker.py` (TCP NDJSON broker) and `bin/emit.py` (hook publisher).
-- Bridge (Windows-side transport, C#): sibling directory
-  `/mnt/w/sep/claude-status-bridge/`. See `SerialOutput.cs` and
-  `StateMapper.cs` for what the bridge emits onto the serial port —
-  this is the authoritative upstream for the wire contract in §3.
+- **Plugin** (Claude Code hooks + broker, Python):
+  <https://github.com/sep/cc-status-plugin>. This is the umbrella project
+  for the whole claude-status system; start here for the system-level
+  overview. The relevant source files are `bin/broker.py` (TCP NDJSON
+  broker) and `bin/emit.py` (hook publisher).
+- **Bridge** (Windows-side transport, C# / .NET): the sibling
+  `cc-status-bridge` repo under the same org. See `SerialOutput.cs`
+  and `StateMapper.cs` for what the bridge emits onto the serial port
+  — this is the authoritative upstream for the wire contract in §3.
 - The bridge mirrors broker discovery state to
-  `%USERPROFILE%\.claude-status\sessions\<id>\broker.json` on the Windows
-  side, so the Windows EXE can find live sessions without traversing
-  `\\wsl$\`. Firmware does not need to know about this — it only sees
-  the serial output.
+  `%USERPROFILE%\.claude-status\sessions\<id>\broker.json` on the
+  Windows side, so the Windows EXE can find live sessions without
+  traversing `\\wsl$\`. Firmware does not need to know about this — it
+  only sees the serial output.

@@ -1,6 +1,11 @@
-# claude-status
+# claude-status — display firmware
 
-A HUB75 LED panel that shows what your Claude Code session is doing — live.
+The ESP32-S3 firmware that renders Claude Code session state on a HUB75
+RGB LED panel. **One of three components** in claude-status — the
+plugin is the umbrella project with the full system overview, install
+walkthrough, and pointers to the other pieces:
+
+**→ <https://github.com/sep/cc-status-plugin>**
 
 ```
 ┌────────────────────────────────────┐
@@ -13,37 +18,46 @@ A HUB75 LED panel that shows what your Claude Code session is doing — live.
 └────────────────────────────────────┘
 ```
 
-A small ESP32-S3 reads NDJSON state updates over USB-Serial-JTAG and renders
-them on a 64×32 (or chained-larger) HUB75 RGB LED panel. The host-side bridge
-hooks into Claude Code's lifecycle events and forwards them to the panel.
+This repo is just the firmware: a small ESP32-S3 reads NDJSON state
+updates over USB-Serial-JTAG and renders them on a 64×32 (or
+chained-larger) HUB75 panel. The bridge hooks into the plugin's broker
+and forwards state to the firmware over USB.
 
-## End users — flash a board
+## Flash your hardware
 
-If you have one of the supported dev boards and a HUB75 panel, head to the
-flasher site and click your board:
+If you've already installed the plugin + bridge and just need the
+display half, the flasher site is the entry point:
 
-**→ https://sep.github.io/cc-status-display/**
+**→ <https://sep.github.io/cc-status-display/>**
 
-Each board's page has a pinout diagram, wiring instructions, power notes, and
-a one-click flash button (Chrome/Edge — WebSerial isn't yet supported in
-Firefox or Safari).
+Pick your dev board and click Flash. Each board's page has its
+GPIO-to-HUB75 pinout, power notes, and a verification recipe. Chrome
+or Edge required (WebSerial).
 
-Supported boards as of v1.2:
+Supported dev boards:
 
 - **SparkFun Thing Plus ESP32-S3**
 - **Lonely Binary ESP32-S3 N16R8 Gold Edition**
 
+To add a new board, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Developers
 
-- [`FIRMWARE.md`](FIRMWARE.md) — the wire-protocol spec, authoritative for
-  what bytes the bridge sends and the firmware accepts. Read this first if
-  you're touching the serial path.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — coding conventions, how to add a new
-  board, how to add a new state.
-- [`MAINTENANCE.md`](MAINTENANCE.md) — every external dependency, how it's
-  pinned, where to watch for upstream changes, and how to bump. Read this
-  first when picking the project back up after months away.
-- [`main/`](main/) — firmware source. Single-binary ESP-IDF v6.0 project.
+- [`FIRMWARE.md`](FIRMWARE.md) — wire-protocol spec, authoritative for
+  what bytes the bridge sends and the firmware accepts. Read this first
+  if you're touching the serial path.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — coding conventions, how to add
+  a new board, how to add a new state.
+- [`MAINTENANCE.md`](MAINTENANCE.md) — every external dependency, how
+  it's pinned, where to watch for upstream changes, and how to bump.
+  Read this first when picking the project back up after months away.
+- [`main/`](main/) — firmware source. Single-binary ESP-IDF v6.0
+  project.
+
+For the system architecture (how the plugin, bridge, and this firmware
+fit together), see the [plugin repo's README][plugin].
+
+[plugin]: https://github.com/sep/cc-status-plugin
 
 ### Local build & flash
 
@@ -62,39 +76,17 @@ The `BOARD_NAME` macros are defined in [`main/board_config.h`](main/board_config
 
 ### Cutting a release
 
-CI builds per-board binaries, deploys the flasher site to GitHub Pages, and
-attaches `.tar.gz` archives to a GitHub Release. Triggered by pushing a
-semver-tagged commit:
+CI builds per-board binaries, deploys the flasher site to GitHub Pages,
+and attaches `.tar.gz` archives to a GitHub Release. Triggered by
+pushing a semver-tagged commit:
 
 ```sh
-git tag v1.2.0
+git tag v0.1.0
 git push --tags
 ```
 
-See [`.github/workflows/release.yml`](.github/workflows/release.yml) for the
-build matrix and steps.
-
-## Architecture
-
-The full system has three independent halves talking via NDJSON:
-
-```
- Claude Code (WSL)
-    │
-    ▼ lifecycle hooks
- emit.py ─► broker.py        (localhost TCP, NDJSON pub/sub)
-                │
-                ▼
-       ClaudeStatusBridge.exe (Windows-side, C# .NET)
-                │
-                ▼ NDJSON over USB-Serial-JTAG
-        ESP32-S3 firmware    ← this repo
-                │
-                ▼ HUB75
-        WaveShare RGB-Matrix-P2.5-64×32
-```
-
-Pointers to the other halves live in [`FIRMWARE.md` §11](FIRMWARE.md).
+See [`.github/workflows/release.yml`](.github/workflows/release.yml)
+for the build matrix and steps.
 
 ## License
 
