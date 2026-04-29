@@ -95,4 +95,4 @@ Pointers to the other halves live in [`FIRMWARE.md` §11](FIRMWARE.md).
 
 ## License
 
-TBD.
+[MIT](LICENSE). © 2026 SEP.

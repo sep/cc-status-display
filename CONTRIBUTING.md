@@ -57,8 +57,10 @@ beats perfection.
    [`.github/workflows/release.yml`](.github/workflows/release.yml) and the
    board-id list in [`scripts/make_manifest.py`](scripts/make_manifest.py).
 5. Add a flash button entry in
-   [`docs/site/index.html`](docs/site/index.html) and (when the per-board
-   pages exist) a wiring page under `docs/site/boards/`.
+   [`docs/site/index.html`](docs/site/index.html) and a wiring page under
+   `docs/site/boards/` (copy an existing one as a template). Save the
+   manufacturer's pinout image into `docs/site/boards/img/` with
+   attribution in the page's `<figcaption>`.
 6. Test-flash on the actual hardware. The firmware logs `board: <BOARD_LABEL>`
    at startup so you can confirm via UART monitor that the right preset is
    active.

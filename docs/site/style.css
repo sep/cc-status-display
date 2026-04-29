@@ -109,4 +109,78 @@ code {
   border-radius: 3px;
   padding: 0.1rem 0.35rem;
   font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
+pre {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* ============================================================== */
+/* Per-board page elements                                        */
+/* ============================================================== */
+
+.board-header h1 {
+  font-size: 1.6rem;
+  margin-bottom: 0.25rem;
+}
+.board-header .tagline {
+  font-size: 1rem;
+}
+.board-header a {
+  font-size: 0.9rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  background: var(--bg-card);
+  font-weight: 600;
+}
+td:nth-child(1) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 500;
+}
+
+figure {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+figure img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+figcaption {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  margin-top: 0.5rem;
+}
+
+ol li, ul li { margin: 0.25rem 0; }
