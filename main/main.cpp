@@ -31,6 +31,7 @@
 #include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
 #include "font5x7.h"
+#include <esp_app_desc.h>
 #include <esp_log.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
@@ -1139,7 +1140,12 @@ extern "C" void app_main() {
   gpio_set_level(static_cast<gpio_num_t>(BOARD_PINS.oe), 1);
 
   init_font5x7();
-  ESP_LOGI(TAG, "board: %s", BOARD_LABEL);
+  // Firmware version is built from version.txt + (for non-release
+  // builds) a 6-char commit SHA appended as "+abc123". CI release
+  // workflow strips the SHA suffix; local dev/canary/smoke builds
+  // keep it. See CMakeLists.txt and MAINTENANCE.md.
+  const esp_app_desc_t *desc = esp_app_get_description();
+  ESP_LOGI(TAG, "firmware: %s  board: %s", desc->version, BOARD_LABEL);
 
   // NVS init before anything that reads the saved config. If the partition
   // is corrupt or a version mismatch (rare on a dev board), wipe and retry

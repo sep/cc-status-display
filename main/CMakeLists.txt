@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "main.cpp"
     INCLUDE_DIRS "."
-    PRIV_REQUIRES esp_driver_gpio esp_driver_usb_serial_jtag esp_timer nvs_flash
+    PRIV_REQUIRES esp_app_format esp_driver_gpio esp_driver_usb_serial_jtag esp_timer nvs_flash
 )
 
 # Forward -DBOARD_NAME=... from the build command line through to the

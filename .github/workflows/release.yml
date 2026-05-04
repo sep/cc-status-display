@@ -26,12 +26,27 @@ jobs:
             macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
           - id: lonely_binary_n16r8
             macro: BOARD_LONELY_BINARY_N16R8_GOLD
+    env:
+      # Tells the firmware's CMake to use the bare version.txt string
+      # (no "+sha6" dev suffix) — see CMakeLists.txt and MAINTENANCE.md.
+      CC_RELEASE_BUILD: "1"
     steps:
       # Actions are pinned to commit SHAs (not tags) for supply-chain
       # security — see MAINTENANCE.md. Dependabot bumps these weekly.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           submodules: recursive
+
+      - name: Verify tag matches version.txt
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION_TXT=$(tr -d '[:space:]' < version.txt)
+          if [ "$TAG" != "$VERSION_TXT" ]; then
+            echo "::error::Tag '$TAG' does not match version.txt ('$VERSION_TXT')."
+            echo "::error::Bump version.txt to match the tag, or re-tag to match version.txt, before releasing."
+            exit 1
+          fi
 
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0

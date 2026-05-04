@@ -124,16 +124,89 @@ discontinued.
 
 When adding support for a new board, follow CONTRIBUTING.md.
 
+## Versioning
+
+The firmware version's source of truth is **`version.txt`** at the
+repo root. Bumped by hand when starting work toward a new release;
+tagged into git when shipping.
+
+CMake reads `version.txt` and sets `PROJECT_VER`:
+
+- **Release builds** (CI workflow `.github/workflows/release.yml`,
+  triggered by tag pushes) export `CC_RELEASE_BUILD=1` in the
+  environment. Those builds use the bare `version.txt` string,
+  e.g. `v0.1.0`.
+- **Everything else** (local dev, smoke, canary) appends a 6-char
+  commit SHA as `+abc123`, so the binary always carries the exact
+  commit it was built from. Format: `v0.1.0+a1b2c3`.
+
+The version is embedded in the app image header at build time and
+read at runtime via `esp_app_get_description()`. The firmware logs
+it on boot alongside the board label, e.g.:
+
+```
+I (1234) claude-status: firmware: v0.1.0  board: Lonely Binary ESP32-S3 N16R8 Gold Edition
+```
+
+A few consequences:
+
+- **The CI release-tarball filename uses `${GITHUB_REF_NAME}`** (the
+  tag string). The release workflow also fails the build if
+  `version.txt` and the pushed tag disagree, so the boot-log version
+  and the artifact filename are guaranteed to match.
+- **Local builds may have a slightly stale SHA suffix** if you commit
+  without re-running CMake's configure step. Run
+  `idf.py reconfigure && idf.py build` (or `idf.py fullclean`) when
+  exact-SHA accuracy matters.
+- **If git isn't available** (e.g., source-only download with no
+  `.git` directory), the SHA falls back to `+nosha`. Still indicates
+  "non-release."
+- **The wire-protocol version is independent.** Wire protocol lives
+  in the bridge repo and is at v1.2; firmware versions are unrelated
+  numbers. Don't conflate.
+
+### When to bump
+
+Loose semver, scoped to firmware behavior end users will notice:
+
+- **Major (vX.0.0)** — a behavior change a user has to know about.
+  E.g., the meaning of a state visual changes; a board preset's
+  GPIOs change in a way that breaks existing wiring; the wire
+  contract this firmware speaks bumps to a new major. Rare.
+- **Minor (vX.Y.0)** — a new state in the lexicon, a new dispatch
+  type, a new board preset, a new visual feature (like the ack
+  button or task counting). Additive and backward-compatible.
+- **Patch (vX.Y.Z)** — bug fixes, panel-quirk compensations, doc
+  edits, dependency bumps that don't change behavior.
+
+### Pre-1.0
+
+While we're below v1.0.0, the bar is looser — minor bumps are fine
+for behavior changes, patch for everything else. Promotion to v1.0.0
+should signal "this is the firmware contract end users can rely on
+not to change underneath them." We're not there yet.
+
 ## Cutting a release
 
 1. Confirm the latest smoke build was green.
 2. Confirm the latest IDF canary is either green or not running
    (canary skips when our pin matches latest).
-3. On a real ESP32 board, flash the current `main` and walk through
-   each per-board page's "verify it works" recipe.
-4. Update CHANGELOG (when one exists — currently relying on
+3. **Bump `version.txt`** to the version you're about to release
+   (e.g., `v0.2.0`), commit on `main`. The CI release workflow
+   verifies that the pushed tag matches `version.txt` and fails
+   loudly if they drift.
+4. On a real ESP32 board, flash from the just-bumped `main` and
+   walk through each per-board page's "verify it works" recipe.
+   Confirm the boot log's `firmware:` line shows the right base
+   version (with a `+sha6` suffix on local builds).
+5. Update CHANGELOG (when one exists — currently relying on
    GitHub's auto-generated release notes).
-5. `git tag vX.Y.Z && git push --tags`. CI does the rest.
+6. `git tag vX.Y.Z && git push --tags`. CI does the rest. The
+   resulting binary will boot logging `firmware: vX.Y.Z` (no SHA
+   suffix, since CI sets `CC_RELEASE_BUILD=1`).
+7. Bump `version.txt` to the next planned version (e.g., `v0.3.0`)
+   and commit on `main` so subsequent dev builds carry the
+   forward-looking version + SHA suffix.
 
 ## When a Monday is loud
 
