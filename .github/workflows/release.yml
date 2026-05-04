@@ -40,11 +40,17 @@ jobs:
       - name: Verify tag matches version.txt
         run: |
           set -euo pipefail
+          # version.txt holds bare semver (e.g. "0.3.0"); git tag has the
+          # conventional 'v' prefix ("v0.3.0"). Strip a leading v from
+          # both sides before comparing so either form works either side.
           TAG="${GITHUB_REF_NAME}"
+          TAG_NORMALIZED="${TAG#v}"
           VERSION_TXT=$(tr -d '[:space:]' < version.txt)
-          if [ "$TAG" != "$VERSION_TXT" ]; then
+          VERSION_NORMALIZED="${VERSION_TXT#v}"
+          if [ "$TAG_NORMALIZED" != "$VERSION_NORMALIZED" ]; then
             echo "::error::Tag '$TAG' does not match version.txt ('$VERSION_TXT')."
-            echo "::error::Bump version.txt to match the tag, or re-tag to match version.txt, before releasing."
+            echo "::error::After stripping any leading 'v', '$TAG_NORMALIZED' != '$VERSION_NORMALIZED'."
+            echo "::error::Bump version.txt to match the tag (or re-tag to match version.txt) before releasing."
             exit 1
           fi
 

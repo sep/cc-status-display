@@ -130,6 +130,15 @@ The firmware version's source of truth is **`version.txt`** at the
 repo root. Bumped by hand when starting work toward a new release;
 tagged into git when shipping.
 
+**Convention** (matches npm / Cargo / most ecosystems): `version.txt`
+holds **bare semver** like `0.3.0`. Git tags use the standard
+**`v`-prefixed** form like `v0.3.0`. The CI verification strips a
+leading `v` from both sides before comparing, so either form on
+either side is accepted — but bare-in-file + v-prefixed-tag is the
+documented norm. Either way, the boot-log and tarball filename
+always present with the `v` prefix for consistency (CMake prepends
+it if missing).
+
 CMake reads `version.txt` and sets `PROJECT_VER`:
 
 - **Release builds** (CI workflow `.github/workflows/release.yml`,

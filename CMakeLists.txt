@@ -21,6 +21,14 @@ cmake_minimum_required(VERSION 3.16)
 file(READ "${CMAKE_CURRENT_LIST_DIR}/version.txt" _CC_VERSION_BASE)
 string(STRIP "${_CC_VERSION_BASE}" _CC_VERSION_BASE)
 
+# Normalize: ensure PROJECT_VER is consistent with the v-prefixed git
+# tag / release-tarball naming. version.txt may be bare semver
+# ("0.3.0") per the common convention; we add the 'v' here so the
+# boot log, manifest, and tarball filename all agree.
+if(NOT _CC_VERSION_BASE MATCHES "^[vV]")
+  set(_CC_VERSION_BASE "v${_CC_VERSION_BASE}")
+endif()
+
 if(DEFINED ENV{CC_RELEASE_BUILD} AND "$ENV{CC_RELEASE_BUILD}" STREQUAL "1")
   set(PROJECT_VER "${_CC_VERSION_BASE}")
 else()
