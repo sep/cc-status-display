@@ -43,9 +43,10 @@ To add a new board, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Developers
 
-- [`FIRMWARE.md`](FIRMWARE.md) — wire-protocol spec, authoritative for
-  what bytes the bridge sends and the firmware accepts. Read this first
-  if you're touching the serial path.
+- **Wire-protocol spec** — authoritative for what bytes the bridge
+  sends and the firmware accepts. Lives canonically in the bridge
+  repo: <https://github.com/sep/cc-status-bridge/blob/main/docs/FIRMWARE.md>.
+  Read it first if you're touching the serial path.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — coding conventions, how to add
   a new board, how to add a new state.
 - [`MAINTENANCE.md`](MAINTENANCE.md) — every external dependency, how

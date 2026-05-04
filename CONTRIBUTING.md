@@ -67,8 +67,9 @@ beats perfection.
 
 ## Adding a new state to the lexicon
 
-The wire contract is in [`FIRMWARE.md` §4](FIRMWARE.md). Update the spec
-first, then:
+The wire contract is the canonical [FIRMWARE.md in the bridge
+repo](https://github.com/sep/cc-status-bridge/blob/main/docs/FIRMWARE.md)
+(§4). Update the spec there first, then in this repo:
 
 1. Add the new value to `enum class Status` in `main.cpp`.
 2. Update `status_name()` and `parse_status_string()`.
@@ -80,9 +81,12 @@ first, then:
 
 ## Wire-protocol changes
 
-Any change to the JSON shape goes in [`FIRMWARE.md`](FIRMWARE.md) **first**,
-then implementation. The bridge author (separate repo) reads the spec to
-understand what to send. Don't drift the implementation ahead of the spec.
+Any change to the JSON shape goes in the [canonical
+FIRMWARE.md](https://github.com/sep/cc-status-bridge/blob/main/docs/FIRMWARE.md)
+(in the bridge repo) **first**, then implementation. The plugin
+author and bridge author both read the canonical to know what to
+send. Don't drift the firmware ahead of the spec — and don't fork
+the spec into this repo either, even temporarily.
 
 ## Commit & PR style
 

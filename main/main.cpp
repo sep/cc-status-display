@@ -17,9 +17,11 @@
 //        ├─ for each panel: render slot(s) into its viewport
 //        └─ flip_buffer
 //
-// Wire contract (host→device JSON, device→host responses) lives in
-// /FIRMWARE.md. Board-specific GPIO assignments live in board_config.h.
-// Coding conventions: see /CONTRIBUTING.md.
+// Wire contract (host→device JSON, device→host responses) is canonical
+// in the bridge repo:
+//   https://github.com/sep/cc-status-bridge/blob/main/docs/FIRMWARE.md
+// Board-specific GPIO assignments live in board_config.h. Coding
+// conventions: see /CONTRIBUTING.md.
 // ============================================================================
 
 #include "hub75.h"
@@ -78,7 +80,7 @@ static inline int slot_index(uint8_t panel_idx, SlotKind kind) {
 }
 
 // ======================================================================
-// State lexicon — FIRMWARE.md §4
+// State lexicon — wire spec §4
 // ======================================================================
 
 enum class Status : uint8_t {
@@ -447,7 +449,7 @@ static void handle_configure(const cJSON *root) {
 }
 
 // ======================================================================
-// Line handler — parse JSON once, then dispatch by `type` per FIRMWARE.md §8.
+// Line handler — parse JSON once, then dispatch by `type` per wire spec §8.
 // ======================================================================
 
 static void apply_state_update(const cJSON *root) {
