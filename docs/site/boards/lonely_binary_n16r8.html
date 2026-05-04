@@ -26,6 +26,9 @@
       <li>Jumper wires (13 signal lines + at least one ground)</li>
       <li>USB-C cable to your computer</li>
       <li><strong>Recommended:</strong> 10 kΩ resistor for OE pull-up (see below)</li>
+      <li><strong>Optional:</strong> a momentary push button if you want a
+        dedicated "ack" control off-board — the BOOT button on the dev
+        board works by default (see <a href="#ack-button">The ack button</a>)</li>
     </ul>
   </section>
 
@@ -41,28 +44,39 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>HUB75 signal</th><th>IDC pin #</th><th>ESP32 GPIO</th></tr>
+          <tr><th>IDC pin #</th><th>Color / signal</th><th>ESP32 GPIO</th></tr>
         </thead>
         <tbody>
-          <tr><td>R1</td>  <td>1</td>  <td>GPIO 4</td></tr>
-          <tr><td>G1</td>  <td>2</td>  <td>GPIO 5</td></tr>
-          <tr><td>B1</td>  <td>3</td>  <td>GPIO 6</td></tr>
-          <tr><td>GND</td> <td>4</td>  <td>any GND pin on the board</td></tr>
-          <tr><td>R2</td>  <td>5</td>  <td>GPIO 7</td></tr>
-          <tr><td>G2</td>  <td>6</td>  <td>GPIO 8</td></tr>
-          <tr><td>B2</td>  <td>7</td>  <td>GPIO 9</td></tr>
-          <tr><td>E</td>   <td>8</td>  <td>not connected (1/16-scan panel)</td></tr>
-          <tr><td>A</td>   <td>9</td>  <td>GPIO 10</td></tr>
-          <tr><td>B</td>   <td>10</td> <td>GPIO 11</td></tr>
-          <tr><td>C</td>   <td>11</td> <td>GPIO 12</td></tr>
-          <tr><td>D</td>   <td>12</td> <td>GPIO 13</td></tr>
-          <tr><td>CLK</td> <td>13</td> <td>GPIO 14</td></tr>
-          <tr><td>LAT</td> <td>14</td> <td>GPIO 15</td></tr>
-          <tr><td>OE</td>  <td>15</td> <td>GPIO 16</td></tr>
-          <tr><td>GND</td> <td>16</td> <td>any GND pin on the board</td></tr>
+          <tr><td>1</td>  <td>R (top half)</td>            <td>GPIO 4</td></tr>
+          <tr><td>2</td>  <td>B (top half) <sup>*</sup></td><td>GPIO 5</td></tr>
+          <tr><td>3</td>  <td>G (top half) <sup>*</sup></td><td>GPIO 6</td></tr>
+          <tr><td>4</td>  <td>GND</td>                      <td>any GND pin on the board</td></tr>
+          <tr><td>5</td>  <td>R (bottom half)</td>         <td>GPIO 7</td></tr>
+          <tr><td>6</td>  <td>B (bottom half) <sup>*</sup></td><td>GPIO 8</td></tr>
+          <tr><td>7</td>  <td>G (bottom half) <sup>*</sup></td><td>GPIO 9</td></tr>
+          <tr><td>8</td>  <td>E (NC on a 1/16-scan panel)</td><td>—</td></tr>
+          <tr><td>9</td>  <td>A (row select)</td>           <td>GPIO 10</td></tr>
+          <tr><td>10</td> <td>B (row select)</td>           <td>GPIO 11</td></tr>
+          <tr><td>11</td> <td>C (row select)</td>           <td>GPIO 12</td></tr>
+          <tr><td>12</td> <td>D (row select)</td>           <td>GPIO 13</td></tr>
+          <tr><td>13</td> <td>CLK</td>                      <td>GPIO 14</td></tr>
+          <tr><td>14</td> <td>LAT</td>                      <td>GPIO 15</td></tr>
+          <tr><td>15</td> <td>OE</td>                       <td>GPIO 16</td></tr>
+          <tr><td>16</td> <td>GND</td>                      <td>any GND pin on the board</td></tr>
         </tbody>
       </table>
     </div>
+
+    <p>
+      <sup>*</sup> <strong>Panel-quirk note:</strong> on the WaveShare
+      RGB-Matrix-P2.5-64×32 panel, IDC pins 2 and 3 (and 6 and 7) are
+      <strong>swapped vs the HUB75 standard</strong> — pin 2 internally
+      drives the blue channel, pin 3 drives green. The firmware compensates
+      so that the natural sequential wiring above renders colors correctly.
+      If you substitute a different (HUB75-spec-compliant) panel, edit
+      <code>main/board_config.h</code> to swap <code>g1↔b1</code> and
+      <code>g2↔b2</code> back to conventional order.
+    </p>
 
     <h3>Board pinout reference</h3>
     <figure>
@@ -126,6 +140,60 @@ echo '{"state":"working","subagent_count":2}' &gt; $PORT</code></pre>
         Panel should switch to amber <strong>WORKING</strong> with a faster
         pulsing border and two amber bars near the bottom edge.</li>
     </ol>
+  </section>
+
+  <section id="ack-button">
+    <h2>The ack button</h2>
+    <p>
+      The <strong>BOOT button</strong> on your dev board doubles as an
+      "I see it" button for the panel's BLOCKED state. When something
+      blocks the Claude session and the panel starts strobing red,
+      press BOOT once to:
+    </p>
+    <ul>
+      <li>Stop the strobing animation across every blocked slot driven
+        by this ESP.</li>
+      <li>Dim the BLOCKED text and indicators to a muted appearance.</li>
+      <li>Keep the BLOCKED state visible (so you can walk away from
+        your desk and still see "yes, still waiting on me"), but without
+        the cortisol-spiking alarm.</li>
+    </ul>
+    <p>
+      The ack auto-clears once no slot on this ESP is blocked anymore,
+      so the next blocked event re-alarms fresh. Pressing the button
+      multiple times is idempotent — frustration-smash safe.
+    </p>
+    <p>
+      On this board GPIO&nbsp;0 is wired only to the BOOT button (no
+      LED conflict), so it's a clean, reliable input.
+    </p>
+
+    <h3>Optional: wire your own button</h3>
+    <p>
+      If you want a button somewhere more reachable than the dev board
+      itself (e.g., taped to your desk near your keyboard), wire a
+      momentary push button between any free GPIO and a GND pin. Then
+      edit <code>BoardPins.ack_button</code> in
+      <code>main/board_config.h</code> to that GPIO number, rebuild,
+      and flash.
+    </p>
+    <p>
+      <strong>No external pull-up resistor needed</strong> — the firmware
+      enables the ESP32's internal pull-up (~45&nbsp;kΩ).
+    </p>
+    <ul>
+      <li>One button terminal → ESP GPIO (e.g., GPIO 21 or 42 — both
+        free and exposed on this board)</li>
+      <li>Other button terminal → any GND pin</li>
+      <li>Active-low: not pressed reads HIGH, pressed reads LOW.</li>
+    </ul>
+    <p>
+      For long wire runs (more than ~30&nbsp;cm) or electrically noisy
+      environments, an external 10&nbsp;kΩ resistor between the GPIO and
+      3V3 adds noise immunity but isn't required. Mechanical bounce is
+      already handled in firmware (60&nbsp;ms debounce), so a bypass
+      capacitor is unnecessary.
+    </p>
   </section>
 
   <section>

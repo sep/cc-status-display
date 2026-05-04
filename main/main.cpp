@@ -127,14 +127,21 @@ struct ClientSnapshot {
   int64_t  state_changed_at_us  = 0;
   int64_t  last_line_at_us      = 0;
   int      subagent_count       = 0;
+  int      tasks_active         = 0;  // pending + in_progress in the session's plan
+  int      tasks_completed      = 0;  // tasks marked done this session
   char     last_event[32]       = {0};
 };
 
 static ClientSnapshot    g_clients[TOTAL_SLOTS];
-static SemaphoreHandle_t g_mutex          = nullptr; // guards g_clients, runtime config vars, g_identify_until_us
+static SemaphoreHandle_t g_mutex          = nullptr; // guards g_clients, runtime config vars, g_identify_until_us, g_blocked_ack_active
 static SemaphoreHandle_t g_driver_mutex   = nullptr; // guards g_driver during swap
 static Hub75Driver      *g_driver         = nullptr;
 static int64_t           g_identify_until_us = 0;    // 0 = no identify pending; else esp_timer_get_time deadline
+static bool              g_blocked_ack_active = false;
+// ESP-wide ack flag. Set by the ack button when at least one slot is BLOCKED.
+// Causes BLOCKED renders to render in a calm, non-strobing variant. Cleared
+// automatically when no slot is currently BLOCKED — so a new blocked event
+// after a full clear re-alarms fresh.
 
 // ======================================================================
 // Viewport — a rectangular slice of the framebuffer that a slot renders into.
@@ -228,11 +235,15 @@ static void send_pong(int64_t seq) {
       char id[8];
       format_client_id(p, static_cast<SlotKind>(k), id, sizeof(id));
       n += snprintf(buf + n, sizeof(buf) - n,
-          "%s\"%s\":{\"state\":\"%s\",\"subagent_count\":%d,\"uptime_ms_at_change\":%lld}",
+          "%s\"%s\":{\"state\":\"%s\",\"subagent_count\":%d,"
+          "\"tasks_active\":%d,\"tasks_completed\":%d,"
+          "\"uptime_ms_at_change\":%lld}",
           first ? "" : ",",
           id,
           status_name(cs.state),
           cs.subagent_count,
+          cs.tasks_active,
+          cs.tasks_completed,
           static_cast<long long>(cs.state_changed_at_us / 1000));
       first = false;
       if (n >= static_cast<int>(sizeof(buf)) - 64) break;  // guardrail
@@ -247,11 +258,13 @@ static void send_spontaneous_state_for(uint8_t panel_idx, SlotKind kind,
                                        const ClientSnapshot &cs) {
   char id[8];
   format_client_id(panel_idx, kind, id, sizeof(id));
-  char buf[192];
+  char buf[256];
   const int n = snprintf(buf, sizeof(buf),
       "{\"type\":\"state\",\"client\":\"%s\",\"state\":\"%s\","
-      "\"subagent_count\":%d,\"uptime_ms\":%lld}\n",
-      id, status_name(cs.state), cs.subagent_count,
+      "\"subagent_count\":%d,\"tasks_active\":%d,\"tasks_completed\":%d,"
+      "\"uptime_ms\":%lld}\n",
+      id, status_name(cs.state),
+      cs.subagent_count, cs.tasks_active, cs.tasks_completed,
       static_cast<long long>(esp_timer_get_time() / 1000));
   write_json_line(buf, n);
 }
@@ -481,6 +494,22 @@ static void apply_state_update(const cJSON *root) {
     new_count = v < 0 ? 0 : v;
   }
 
+  const cJSON *active_node = cJSON_GetObjectItemCaseSensitive(root, "tasks_active");
+  int new_active = 0;
+  bool have_active = cJSON_IsNumber(active_node);
+  if (have_active) {
+    const int v = static_cast<int>(cJSON_GetNumberValue(active_node));
+    new_active = v < 0 ? 0 : v;
+  }
+
+  const cJSON *completed_node = cJSON_GetObjectItemCaseSensitive(root, "tasks_completed");
+  int new_completed = 0;
+  bool have_completed = cJSON_IsNumber(completed_node);
+  if (have_completed) {
+    const int v = static_cast<int>(cJSON_GetNumberValue(completed_node));
+    new_completed = v < 0 ? 0 : v;
+  }
+
   if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
     const int64_t now_us = esp_timer_get_time();
 
@@ -507,7 +536,9 @@ static void apply_state_update(const cJSON *root) {
     }
     cs.pinned = true;
     cs.last_line_at_us = now_us;
-    if (have_count) cs.subagent_count = new_count;
+    if (have_count)     cs.subagent_count  = new_count;
+    if (have_active)    cs.tasks_active    = new_active;
+    if (have_completed) cs.tasks_completed = new_completed;
     if (event_str) {
       strncpy(cs.last_event, event_str, sizeof(cs.last_event) - 1);
       cs.last_event[sizeof(cs.last_event) - 1] = '\0';
@@ -617,6 +648,81 @@ static void serial_reader_task(void *) {
       } else {
         len = 0;  // too-long line; resync on next '\n'
       }
+    }
+  }
+}
+
+// ======================================================================
+// Ack button — momentary push button that silences the BLOCKED-state
+// strobe across every slot driven by this ESP. Polled with software
+// debounce. Active-low; uses internal pull-up. Default GPIO is the BOOT
+// button on most ESP32-S3 dev boards (configured per board in
+// board_config.h). Set BoardPins.ack_button to -1 to disable.
+// ======================================================================
+
+static void ack_button_task(void *) {
+  if (BOARD_PINS.ack_button < 0) {
+    ESP_LOGI(TAG, "ack_button_task: disabled (ack_button = -1)");
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  const gpio_num_t pin = static_cast<gpio_num_t>(BOARD_PINS.ack_button);
+  gpio_config_t btn_cfg = {};
+  btn_cfg.pin_bit_mask = 1ULL << BOARD_PINS.ack_button;
+  btn_cfg.mode = GPIO_MODE_INPUT;
+  btn_cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+  btn_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  btn_cfg.intr_type = GPIO_INTR_DISABLE;
+  gpio_config(&btn_cfg);
+
+  // Pulled-up = HIGH = not pressed; LOW = pressed.
+  bool last_steady    = true;   // last debounced state
+  bool candidate      = true;   // most recent raw read
+  int  candidate_runs = 0;      // consecutive matches at the new level
+
+  ESP_ERROR_CHECK(esp_task_wdt_add(nullptr));
+  ESP_LOGI(TAG, "ack_button_task: up (GPIO %d)", BOARD_PINS.ack_button);
+
+  while (true) {
+    esp_task_wdt_reset();
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    const bool current = gpio_get_level(pin) != 0;
+    if (current == last_steady) {
+      // Bouncing back to the steady state — reset the candidate counter.
+      candidate = current;
+      candidate_runs = 0;
+      continue;
+    }
+    if (current != candidate) {
+      candidate = current;
+      candidate_runs = 1;
+      continue;
+    }
+    candidate_runs++;
+    if (candidate_runs < 3) continue;  // require 3 × 20 ms = 60 ms stable
+
+    // Confirmed transition.
+    last_steady = current;
+    candidate_runs = 0;
+
+    if (current) continue;  // we only act on press (LOW), not release
+
+    // Pressed: engage ack iff at least one slot is currently blocked.
+    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+      bool any_blocked = false;
+      for (int i = 0; i < TOTAL_SLOTS; i++) {
+        if (g_clients[i].pinned && g_clients[i].state == Status::BLOCKED) {
+          any_blocked = true;
+          break;
+        }
+      }
+      if (any_blocked && !g_blocked_ack_active) {
+        g_blocked_ack_active = true;
+        ESP_LOGI(TAG, "ack: silencing blocked alarm");
+      }
+      xSemaphoreGive(g_mutex);
     }
   }
 }
@@ -746,12 +852,24 @@ static float border_intensity(Status s, float t_since) {
   }
 }
 
-static void render_border(Hub75Driver &d, const Viewport &vp, Status s, float t_since) {
-  const Rgb dim = status_color_dim(s);
-  const float i = border_intensity(s, t_since);
-  const uint8_t r = static_cast<uint8_t>(dim.r * i);
-  const uint8_t g = static_cast<uint8_t>(dim.g * i);
-  const uint8_t b = static_cast<uint8_t>(dim.b * i);
+static void render_border(Hub75Driver &d, const Viewport &vp, Status s, float t_since,
+                          bool acked) {
+  uint8_t r, g, b;
+  if (acked) {
+    // Calm steady glow, no strobe. Uses the bright color at low intensity
+    // so it's visible-but-quiet, distinct from the alarming variant.
+    const Rgb bright = status_color_bright(s);
+    constexpr float ACK_BORDER_INTENSITY = 0.4f;
+    r = static_cast<uint8_t>(bright.r * ACK_BORDER_INTENSITY);
+    g = static_cast<uint8_t>(bright.g * ACK_BORDER_INTENSITY);
+    b = static_cast<uint8_t>(bright.b * ACK_BORDER_INTENSITY);
+  } else {
+    const Rgb dim = status_color_dim(s);
+    const float i = border_intensity(s, t_since);
+    r = static_cast<uint8_t>(dim.r * i);
+    g = static_cast<uint8_t>(dim.g * i);
+    b = static_cast<uint8_t>(dim.b * i);
+  }
 
   for (int x = 0; x < vp.w; x++) {
     d.set_pixel(vp.x0 + x, vp.y0,             r, g, b);
@@ -798,8 +916,22 @@ static const char *state_text_for(Status s, int width) {
   return (long_w <= width - 2) ? longer : shorter;  // -2 leaves breathing room from border
 }
 
-static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s) {
-  const Rgb c = status_color_bright(s);
+// Scale a state color by the ack mute factor. Same factor used by the
+// task / subagent bars so the panel reads at one consistent dim level
+// when ack'd.
+static constexpr int ACK_NUM = 7;   // 70% of bright
+static constexpr int ACK_DEN = 10;
+static inline Rgb apply_ack_dim(Rgb c, bool acked) {
+  if (!acked) return c;
+  return {
+    static_cast<uint8_t>(c.r * ACK_NUM / ACK_DEN),
+    static_cast<uint8_t>(c.g * ACK_NUM / ACK_DEN),
+    static_cast<uint8_t>(c.b * ACK_NUM / ACK_DEN),
+  };
+}
+
+static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s, bool acked) {
+  const Rgb c = apply_ack_dim(status_color_bright(s), acked);
   const int16_t y = (vp.h - FONT_H) / 2;
 
   if (s == Status::UNKNOWN) {
@@ -818,9 +950,52 @@ static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s) {
   draw_text(d, vp, x, y, text, c.r, c.g, c.b);
 }
 
+// Task-progress bar. Mirrors the subagent bar geometry but lives at the
+// top of the viewport (just inside the top border). Completed tasks are
+// rendered as bright cells, active tasks (pending + in_progress) as dim
+// cells of the same state color. If the total exceeds MAX_RECTS, the
+// rightmost cell becomes OVERFLOW_COLOR — same convention as the
+// subagent bar — to signal "more is going on than what's shown."
+static void render_task_bar(Hub75Driver &d, const Viewport &vp, Status s,
+                            int active, int completed, bool acked) {
+  if (active <= 0 && completed <= 0) return;
+  if (active < 0)    active = 0;
+  if (completed < 0) completed = 0;
+
+  const bool narrow = (vp.w < 48);
+  const int rect_w  = narrow ? 2 : 4;
+  const int rect_h  = narrow ? 2 : 3;
+  const int stride  = rect_w + 1;
+  constexpr int MAX_RECTS = 10;
+  constexpr Rgb OVERFLOW_COLOR = {200, 50, 50};
+
+  const int total = active + completed;
+  const int rect_count = (total > MAX_RECTS) ? MAX_RECTS : total;
+  const int total_w = MAX_RECTS * stride - 1;
+  const int16_t x0 = (vp.w - total_w) / 2;
+  const int16_t y0 = 1 + 1;  // 1 row of border, 1 row of gap
+
+  const Rgb bright = apply_ack_dim(status_color_bright(s), acked);
+  const Rgb dim    = {static_cast<uint8_t>(bright.r * 35 / 100),
+                      static_cast<uint8_t>(bright.g * 35 / 100),
+                      static_cast<uint8_t>(bright.b * 35 / 100)};
+
+  for (int i = 0; i < rect_count; i++) {
+    const int16_t cx = x0 + i * stride;
+    const bool is_overflow = (total > MAX_RECTS && i == rect_count - 1);
+    const Rgb c = is_overflow ? OVERFLOW_COLOR : (i < completed ? bright : dim);
+    for (int dy = 0; dy < rect_h; dy++) {
+      for (int dx = 0; dx < rect_w; dx++) {
+        d.set_pixel(vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
+      }
+    }
+  }
+}
+
 // Subagent-count bar. Cells scale down for narrow viewports so the bar
 // always fits with at least 2 px of side margin.
-static void render_subagent_bar(Hub75Driver &d, const Viewport &vp, Status s, int count) {
+static void render_subagent_bar(Hub75Driver &d, const Viewport &vp, Status s, int count,
+                                bool acked) {
   if (count <= 0) return;
 
   const bool narrow = (vp.w < 48);
@@ -834,7 +1009,7 @@ static void render_subagent_bar(Hub75Driver &d, const Viewport &vp, Status s, in
   const int total_w = MAX_RECTS * stride - 1;
   const int16_t x0 = (vp.w - total_w) / 2;
   const int16_t y0 = vp.h - 1 - 1 - rect_h;
-  const Rgb base = status_color_bright(s);
+  const Rgb base = apply_ack_dim(status_color_bright(s), acked);
 
   for (int i = 0; i < rect_count; i++) {
     const int16_t cx = x0 + i * stride;
@@ -926,17 +1101,22 @@ static void render_conn_dot(Hub75Driver &d) {
 // ======================================================================
 
 static void render_slot(Hub75Driver &d, const Viewport &vp,
-                        const ClientSnapshot &cs, int64_t now_us) {
+                        const ClientSnapshot &cs, int64_t now_us, bool ack_active) {
   const Status state = cs.pinned ? cs.state : Status::UNKNOWN;
   const int64_t changed_at = cs.pinned ? cs.state_changed_at_us : 0;
   const float t_since =
       (changed_at > 0) ? static_cast<float>(now_us - changed_at) / 1'000'000.0f
                        : static_cast<float>(now_us) / 1'000'000.0f;
+  // Per-slot ack: only this slot's rendering is muted, and only when
+  // it's actually in BLOCKED. Other slots in working/idle/etc. on the
+  // same ESP render normally.
+  const bool acked = ack_active && cs.pinned && cs.state == Status::BLOCKED;
 
-  render_border(d, vp, state, t_since);
-  render_state_text(d, vp, state);
+  render_border(d, vp, state, t_since, acked);
+  render_state_text(d, vp, state, acked);
   if (cs.pinned) {
-    render_subagent_bar(d, vp, state, cs.subagent_count);
+    render_task_bar(d, vp, state, cs.tasks_active, cs.tasks_completed, acked);
+    render_subagent_bar(d, vp, state, cs.subagent_count, acked);
     render_rx_flash(d, vp, state, now_us, cs.last_line_at_us);
   }
 }
@@ -993,6 +1173,7 @@ extern "C" void app_main() {
   }
 
   xTaskCreate(serial_reader_task, "serial_rx", 4096, nullptr, 5, nullptr);
+  xTaskCreate(ack_button_task,    "ack_btn",   3072, nullptr, 4, nullptr);
 
   ESP_ERROR_CHECK(esp_task_wdt_add(nullptr));
 
@@ -1016,9 +1197,26 @@ extern "C" void app_main() {
     const int64_t now = esp_timer_get_time();
 
     int64_t identify_until = 0;
+    bool ack_active = false;
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
       memcpy(local, g_clients, sizeof(local));
       identify_until = g_identify_until_us;
+
+      // Auto-clear the ESP-wide ack when no slot is currently blocked.
+      // Walk the live g_clients here (not the local copy) so the cleared
+      // flag is visible to the next button press without a frame of delay.
+      bool any_blocked = false;
+      for (int i = 0; i < TOTAL_SLOTS; i++) {
+        if (g_clients[i].pinned && g_clients[i].state == Status::BLOCKED) {
+          any_blocked = true;
+          break;
+        }
+      }
+      if (!any_blocked && g_blocked_ack_active) {
+        g_blocked_ack_active = false;
+      }
+      ack_active = g_blocked_ack_active;
+
       xSemaphoreGive(g_mutex);
     }
 
@@ -1039,22 +1237,22 @@ extern "C" void app_main() {
       const ClientSnapshot &half_b = local[slot_index(p, SLOT_HALF_B)];
 
       if (full.pinned) {
-        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now);
+        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active);
       } else if (half_a.pinned || half_b.pinned) {
         // Split mode: render each half. Unpinned sibling gets a placeholder.
         if (half_a.pinned) {
-          render_slot(*g_driver, viewport_for(p, SLOT_HALF_A), half_a, now);
+          render_slot(*g_driver, viewport_for(p, SLOT_HALF_A), half_a, now, ack_active);
         } else {
           render_unpinned_placeholder(*g_driver, viewport_for(p, SLOT_HALF_A));
         }
         if (half_b.pinned) {
-          render_slot(*g_driver, viewport_for(p, SLOT_HALF_B), half_b, now);
+          render_slot(*g_driver, viewport_for(p, SLOT_HALF_B), half_b, now, ack_active);
         } else {
           render_unpinned_placeholder(*g_driver, viewport_for(p, SLOT_HALF_B));
         }
       } else {
         // Nothing pinned on this panel — show UNKNOWN across its full viewport.
-        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now);
+        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active);
       }
     }
 
