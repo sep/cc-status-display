@@ -18,6 +18,7 @@ adopt it.
 | **Dependabot PRs** | Mondays | `.github/dependabot.yml` | A pinned GitHub Action has a new upstream version. Review the diff + release notes; merge if green. |
 | **Smoke build** | Mondays | `.github/workflows/smoke.yml` | A weekly rebuild on currently-pinned versions. Red mail = supply-chain rot (managed-component went away, base image broke, etc.). |
 | **ESP-IDF canary** | Mondays | `.github/workflows/idf-canary.yml` | Fires only when Espressif tags an ESP-IDF release newer than our pin. Green = safe to bump. Red = migration work needed. |
+| **BOM review reminder** | Jan 1 + Jul 1 | `.github/workflows/bom-review.yml` | Opens a GitHub issue with a checklist for verifying `docs/build-your-own.md` against current vendor pricing/availability. Close the issue when the review is done and the page's "Last reviewed" date is bumped. |
 
 If Mondays are quiet, the project is healthy. If your inbox lights up,
 treat each one as a single ticket and drain the queue before adding
@@ -102,6 +103,7 @@ bumping.
 | `actions/configure-pages` | `983d7736d9b0ae728b81ab479565c72886d7745b` (v5.0.0) | <https://github.com/actions/configure-pages/releases> |
 | `actions/upload-pages-artifact` | `56afc609e74202658d3ffba0e8f6dda462b719fa` (v3.0.1) | <https://github.com/actions/upload-pages-artifact/releases> |
 | `actions/jekyll-build-pages` | `44a6e6beabd48582f863aeeb6cb2151cc1716697` (v1.0.13) | <https://github.com/actions/jekyll-build-pages/releases> |
+| `actions/github-script` | `3a2844b7e9c422d3c10d287c895573f7108da1b3` (v9.0.0) | <https://github.com/actions/github-script/releases> |
 | `actions/deploy-pages` | `d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e` (v4.0.5) | <https://github.com/actions/deploy-pages/releases> |
 | `softprops/action-gh-release` | `3bb12739c298aeb8a4eeaf626c5b8d85266b0e65` (v2.6.2) | <https://github.com/softprops/action-gh-release/releases> |
 

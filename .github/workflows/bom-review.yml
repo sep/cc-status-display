@@ -1,0 +1,51 @@
+name: BOM review reminder
+
+# Six-monthly nudge to verify docs/build-your-own.md is still in sync
+# with reality — vendor links resolve, prices haven't drifted by more
+# than ~20%, no boards have been discontinued, etc. Opens a GitHub
+# issue with a checklist; close the issue when the page is reviewed.
+#
+# Two scheduled runs per year (Jan 1 and Jul 1 at 09:00 UTC) plus a
+# manual trigger for off-cycle reviews.
+
+on:
+  schedule:
+    - cron: "0 9 1 1,7 *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  open_issue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `BOM review due — verify docs/build-your-own.md (${today})`,
+              body: [
+                "Six-monthly review window for the [Build Your Own](https://github.com/sep/cc-status-display/blob/main/docs/build-your-own.md) parts page.",
+                "",
+                "### Things to check",
+                "",
+                "- [ ] All vendor links resolve (no 404s, no SKU changes).",
+                "- [ ] Approximate prices still within ~20 % of reality.",
+                "- [ ] New supported boards (if any added since last review) are listed in the table.",
+                "- [ ] Optional add-ons still available + relevant.",
+                "- [ ] Total-cost range at the top of the page still accurate.",
+                "",
+                "### When done",
+                "",
+                "- Update prices/links in `docs/build-your-own.md` if drifted.",
+                "- Bump the **Last reviewed** date at the bottom of the page to today.",
+                "- Close this issue.",
+                "",
+                "*This issue was opened automatically by `.github/workflows/bom-review.yml`. See `MAINTENANCE.md` for the policy.*",
+              ].join("\n"),
+              labels: ["maintenance", "docs"],
+            });
