@@ -97,11 +97,17 @@ jobs:
         with:
           path: artifacts/
 
-      - name: Stage GitHub Pages site
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
+
+      - name: Build Jekyll site (Cayman theme, matches plugin/bridge)
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
+        with:
+          source: ./docs
+          destination: ./_site
+
+      - name: Inject firmware binaries + manifests into Jekyll output
         run: |
           set -euo pipefail
-          mkdir -p _site
-          cp -r docs/site/* _site/
           for board_id in thing_plus lonely_binary_n16r8; do
             mkdir -p "_site/firmware/$board_id"
             cp artifacts/firmware-$board_id/*.bin "_site/firmware/$board_id/"
@@ -110,8 +116,6 @@ jobs:
               --version "${GITHUB_REF_NAME}" \
               > "_site/firmware/$board_id/manifest.json"
           done
-
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
 
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3.0.1
         with:

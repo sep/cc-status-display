@@ -73,15 +73,16 @@ features.
 
 - **Currently pinned to:** `10.2.1`
 - **Pinned in:** `<script src="...">` tags in
-  - `docs/site/index.html`
-  - `docs/site/boards/thing_plus.html`
-  - `docs/site/boards/lonely_binary_n16r8.html`
+  - `docs/index.md`
+  - `docs/boards/thing_plus.md`
+  - `docs/boards/lonely_binary_n16r8.md`
 - **CDN:** jsDelivr (`cdn.jsdelivr.net/npm/esp-web-tools@<version>/...`).
   jsDelivr respects exact version pins — unlike `unpkg`, which used to
   silently drift. Don't switch back to a floating major.
 - **Watch:** <https://github.com/espressif/esp-web-tools/releases>
 - **Bump procedure:** edit the version string in all three HTML files,
-  load the local preview (`python3 -m http.server` from `docs/site/`),
+  load the local preview (`bundle exec jekyll serve` from `docs/`, or
+  just rely on `actions/jekyll-build-pages` in the release workflow),
   click each Flash button to confirm the WebSerial dialog still opens.
   No firmware change needed.
 
@@ -100,6 +101,7 @@ bumping.
 | `actions/download-artifact` | `d3f86a106a0bac45b974a628896c90dbdf5c8093` (v4.3.0) | <https://github.com/actions/download-artifact/releases> |
 | `actions/configure-pages` | `983d7736d9b0ae728b81ab479565c72886d7745b` (v5.0.0) | <https://github.com/actions/configure-pages/releases> |
 | `actions/upload-pages-artifact` | `56afc609e74202658d3ffba0e8f6dda462b719fa` (v3.0.1) | <https://github.com/actions/upload-pages-artifact/releases> |
+| `actions/jekyll-build-pages` | `44a6e6beabd48582f863aeeb6cb2151cc1716697` (v1.0.13) | <https://github.com/actions/jekyll-build-pages/releases> |
 | `actions/deploy-pages` | `d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e` (v4.0.5) | <https://github.com/actions/deploy-pages/releases> |
 | `softprops/action-gh-release` | `3bb12739c298aeb8a4eeaf626c5b8d85266b0e65` (v2.6.2) | <https://github.com/softprops/action-gh-release/releases> |
 
@@ -118,7 +120,7 @@ discontinued.
   Vendor is reliable. Risk: low.
 - **Lonely Binary ESP32-S3 N16R8 Gold Edition** — smaller vendor.
   Risk: medium. If the SKU is discontinued, document a substitute in
-  `docs/site/boards/`.
+  `docs/boards/`.
 - **WaveShare RGB-Matrix-P2.5-64×32** — generic HUB75, easy to
   substitute with any compatible 64×32 1/16-scan panel.
 

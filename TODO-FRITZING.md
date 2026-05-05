@@ -86,12 +86,12 @@ Once parts are in the bin:
 
 `File → Export → as Image → SVG` (preferred — crisper, scales freely,
 typically smaller than PNG for this complexity). Save into
-`docs/site/boards/img/<board_id>_wiring.svg`.
+`docs/boards/img/<board_id>_wiring.svg`.
 
 ### 5. Save the editable source
 
 Save the `.fzz` (Fritzing's native project file) right next to the
-exported SVG, e.g. `docs/site/boards/img/<board_id>_wiring.fzz`. That's
+exported SVG, e.g. `docs/boards/img/<board_id>_wiring.fzz`. That's
 the source of truth — future tweaks edit the `.fzz` and re-export.
 
 `.fzz` is a zipped-XML format; git handles it fine, but diffs aren't
@@ -99,7 +99,7 @@ human-readable. Treat it like a binary image asset.
 
 ### 6. Wire up to the board page
 
-In `docs/site/boards/<board_id>.html`, add a new figure inside the
+In `docs/boards/<board_id>.md`, add a new figure inside the
 Wiring section (above the manufacturer pinout image):
 
 ```html

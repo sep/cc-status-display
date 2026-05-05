@@ -1,0 +1,18 @@
+title: ClaudePanel — Display Firmware
+description: ESP32-S3 firmware for the ClaudePanel external status display. Flash a supported board, wire the panel, plug in.
+theme: jekyll-theme-cayman
+
+# url + baseurl deliberately omitted — GitHub Pages injects the right
+# values for project sites (https://<org>.github.io/<repo>). Setting
+# them manually has been observed to break Cayman's stylesheet link.
+
+show_downloads: false
+
+markdown: kramdown
+kramdown:
+  syntax_highlighter: rouge
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
