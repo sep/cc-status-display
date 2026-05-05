@@ -18,6 +18,10 @@ If you've already installed the plugin and bridge and just need to put
 firmware on a board: plug a supported ESP32-S3 into your computer with
 USB-C, pick your board below, and click **Flash**.
 
+**Don't have the hardware yet?** [→ Build your own](build-your-own.html)
+walks through every part you'll need, with vendor links and approximate
+costs (~$50–80 total).
+
 ## Supported boards
 
 ### SparkFun Thing Plus ESP32-S3
