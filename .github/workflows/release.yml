@@ -108,6 +108,12 @@ jobs:
       - name: Inject firmware binaries + manifests into Jekyll output
         run: |
           set -euo pipefail
+          # actions/jekyll-build-pages runs Jekyll inside a Docker
+          # container as a different UID, so _site/ ends up owned by
+          # that container user. Subsequent shell steps run as the
+          # runner user and would hit "Permission denied" trying to
+          # mkdir inside _site/. Reclaim ownership first.
+          sudo chown -R "$(id -u):$(id -g)" _site
           for board_id in thing_plus lonely_binary_n16r8; do
             mkdir -p "_site/firmware/$board_id"
             cp artifacts/firmware-$board_id/*.bin "_site/firmware/$board_id/"
