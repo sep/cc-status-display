@@ -140,6 +140,10 @@ static Hub75Driver      *g_driver         = nullptr;
 static int64_t           g_identify_until_us = 0;    // 0 = no identify pending; else esp_timer_get_time deadline
 static bool              g_blocked_ack_active = false;
 static volatile int64_t  g_last_rx_us         = 0;    // most recent serial-byte arrival; drives render_conn_dot
+static volatile int64_t  g_last_activity_us   = 0;    // most recent state-change or ack press; drives screensaver
+static constexpr int64_t SCREENSAVER_TIMEOUT_US = 5LL * 60LL * 1'000'000LL;  // 5 minutes
+static constexpr int     SCREENSAVER_DIM_NUM     = 1;
+static constexpr int     SCREENSAVER_DIM_DEN     = 10;                       // 10% of bright
 // ESP-wide ack flag. Set by the ack button when at least one slot is BLOCKED.
 // Causes BLOCKED renders to render in a calm, non-strobing variant. Cleared
 // automatically when no slot is currently BLOCKED — so a new blocked event
@@ -535,6 +539,7 @@ static void apply_state_update(const cJSON *root) {
                event_str ? " event=" : "", event_str ? event_str : "");
       cs.state = new_state;
       cs.state_changed_at_us = now_us;
+      g_last_activity_us = now_us;
     }
     cs.pinned = true;
     cs.last_line_at_us = now_us;
@@ -713,6 +718,8 @@ static void ack_button_task(void *) {
     if (current) continue;  // we only act on press (LOW), not release
 
     // Pressed: engage ack iff at least one slot is currently blocked.
+    // Either way, the press counts as user activity for screensaver purposes.
+    g_last_activity_us = esp_timer_get_time();
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
       bool any_blocked = false;
       for (int i = 0; i < TOTAL_SLOTS; i++) {
@@ -856,9 +863,17 @@ static float border_intensity(Status s, float t_since) {
 }
 
 static void render_border(Hub75Driver &d, const Viewport &vp, Status s, float t_since,
-                          bool acked) {
+                          bool acked, bool screensaver) {
   uint8_t r, g, b;
-  if (acked) {
+  if (screensaver) {
+    // Heavy dim, no animation. Override any state-specific behavior so a
+    // BLOCKED slot stops strobing and an IDLE slot stops breathing — the
+    // whole point of the screensaver is "leave me alone."
+    const Rgb bright = status_color_bright(s);
+    r = static_cast<uint8_t>(bright.r * SCREENSAVER_DIM_NUM / SCREENSAVER_DIM_DEN);
+    g = static_cast<uint8_t>(bright.g * SCREENSAVER_DIM_NUM / SCREENSAVER_DIM_DEN);
+    b = static_cast<uint8_t>(bright.b * SCREENSAVER_DIM_NUM / SCREENSAVER_DIM_DEN);
+  } else if (acked) {
     // Calm steady glow, no strobe. Uses the bright color at low intensity
     // so it's visible-but-quiet, distinct from the alarming variant.
     const Rgb bright = status_color_bright(s);
@@ -919,22 +934,32 @@ static const char *state_text_for(Status s, int width) {
   return (long_w <= width - 2) ? longer : shorter;  // -2 leaves breathing room from border
 }
 
-// Scale a state color by the ack mute factor. Same factor used by the
-// task / subagent bars so the panel reads at one consistent dim level
-// when ack'd.
+// Scale a state color by the ack mute factor and/or the screensaver dim
+// factor. Screensaver dominates when both are active — its scale is much
+// heavier, so chaining ack on top would just clip down a few more bits
+// for no useful contrast.
 static constexpr int ACK_NUM = 7;   // 70% of bright
 static constexpr int ACK_DEN = 10;
-static inline Rgb apply_ack_dim(Rgb c, bool acked) {
-  if (!acked) return c;
+static inline Rgb apply_dim(Rgb c, bool acked, bool screensaver) {
+  int num = ACK_DEN;  // start at 1.0 in ACK units
+  int den = ACK_DEN;
+  if (screensaver) {
+    num = SCREENSAVER_DIM_NUM;
+    den = SCREENSAVER_DIM_DEN;
+  } else if (acked) {
+    num = ACK_NUM;
+    den = ACK_DEN;
+  }
   return {
-    static_cast<uint8_t>(c.r * ACK_NUM / ACK_DEN),
-    static_cast<uint8_t>(c.g * ACK_NUM / ACK_DEN),
-    static_cast<uint8_t>(c.b * ACK_NUM / ACK_DEN),
+    static_cast<uint8_t>(c.r * num / den),
+    static_cast<uint8_t>(c.g * num / den),
+    static_cast<uint8_t>(c.b * num / den),
   };
 }
 
-static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s, bool acked) {
-  const Rgb c = apply_ack_dim(status_color_bright(s), acked);
+static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s,
+                              bool acked, bool screensaver) {
+  const Rgb c = apply_dim(status_color_bright(s), acked, screensaver);
   const int16_t y = (vp.h - FONT_H) / 2;
 
   if (s == Status::UNKNOWN) {
@@ -960,7 +985,7 @@ static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s, bool
 // rightmost cell becomes OVERFLOW_COLOR — same convention as the
 // subagent bar — to signal "more is going on than what's shown."
 static void render_task_bar(Hub75Driver &d, const Viewport &vp, Status s,
-                            int active, int completed, bool acked) {
+                            int active, int completed, bool acked, bool screensaver) {
   if (active <= 0 && completed <= 0) return;
   if (active < 0)    active = 0;
   if (completed < 0) completed = 0;
@@ -970,7 +995,7 @@ static void render_task_bar(Hub75Driver &d, const Viewport &vp, Status s,
   const int rect_h  = narrow ? 2 : 3;
   const int stride  = rect_w + 1;
   constexpr int MAX_RECTS = 10;
-  constexpr Rgb OVERFLOW_COLOR = {200, 50, 50};
+  constexpr Rgb OVERFLOW_COLOR_RAW = {200, 50, 50};
 
   const int total = active + completed;
   const int rect_count = (total > MAX_RECTS) ? MAX_RECTS : total;
@@ -978,15 +1003,16 @@ static void render_task_bar(Hub75Driver &d, const Viewport &vp, Status s,
   const int16_t x0 = (vp.w - total_w) / 2;
   const int16_t y0 = 1 + 1;  // 1 row of border, 1 row of gap
 
-  const Rgb bright = apply_ack_dim(status_color_bright(s), acked);
+  const Rgb bright = apply_dim(status_color_bright(s), acked, screensaver);
   const Rgb dim    = {static_cast<uint8_t>(bright.r * 35 / 100),
                       static_cast<uint8_t>(bright.g * 35 / 100),
                       static_cast<uint8_t>(bright.b * 35 / 100)};
+  const Rgb overflow = apply_dim(OVERFLOW_COLOR_RAW, acked, screensaver);
 
   for (int i = 0; i < rect_count; i++) {
     const int16_t cx = x0 + i * stride;
     const bool is_overflow = (total > MAX_RECTS && i == rect_count - 1);
-    const Rgb c = is_overflow ? OVERFLOW_COLOR : (i < completed ? bright : dim);
+    const Rgb c = is_overflow ? overflow : (i < completed ? bright : dim);
     for (int dy = 0; dy < rect_h; dy++) {
       for (int dx = 0; dx < rect_w; dx++) {
         d.set_pixel(vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
@@ -998,7 +1024,7 @@ static void render_task_bar(Hub75Driver &d, const Viewport &vp, Status s,
 // Subagent-count bar. Cells scale down for narrow viewports so the bar
 // always fits with at least 2 px of side margin.
 static void render_subagent_bar(Hub75Driver &d, const Viewport &vp, Status s, int count,
-                                bool acked) {
+                                bool acked, bool screensaver) {
   if (count <= 0) return;
 
   const bool narrow = (vp.w < 48);
@@ -1006,18 +1032,19 @@ static void render_subagent_bar(Hub75Driver &d, const Viewport &vp, Status s, in
   const int rect_h  = narrow ? 2 : 3;
   const int stride  = rect_w + 1;
   constexpr int MAX_RECTS = 10;
-  constexpr Rgb OVERFLOW_COLOR = {200, 50, 50};
+  constexpr Rgb OVERFLOW_COLOR_RAW = {200, 50, 50};
 
   const int rect_count = (count > MAX_RECTS) ? MAX_RECTS : count;
   const int total_w = MAX_RECTS * stride - 1;
   const int16_t x0 = (vp.w - total_w) / 2;
   const int16_t y0 = vp.h - 1 - 1 - rect_h;
-  const Rgb base = apply_ack_dim(status_color_bright(s), acked);
+  const Rgb base     = apply_dim(status_color_bright(s), acked, screensaver);
+  const Rgb overflow = apply_dim(OVERFLOW_COLOR_RAW, acked, screensaver);
 
   for (int i = 0; i < rect_count; i++) {
     const int16_t cx = x0 + i * stride;
     const bool is_overflow = (count > MAX_RECTS && i == rect_count - 1);
-    const Rgb c = is_overflow ? OVERFLOW_COLOR : base;
+    const Rgb c = is_overflow ? overflow : base;
     for (int dy = 0; dy < rect_h; dy++) {
       for (int dx = 0; dx < rect_w; dx++) {
         d.set_pixel(vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
@@ -1115,7 +1142,8 @@ static void render_conn_dot(Hub75Driver &d, int64_t now_us) {
 // ======================================================================
 
 static void render_slot(Hub75Driver &d, const Viewport &vp,
-                        const ClientSnapshot &cs, int64_t now_us, bool ack_active) {
+                        const ClientSnapshot &cs, int64_t now_us,
+                        bool ack_active, bool screensaver) {
   const Status state = cs.pinned ? cs.state : Status::UNKNOWN;
   const int64_t changed_at = cs.pinned ? cs.state_changed_at_us : 0;
   const float t_since =
@@ -1126,12 +1154,17 @@ static void render_slot(Hub75Driver &d, const Viewport &vp,
   // same ESP render normally.
   const bool acked = ack_active && cs.pinned && cs.state == Status::BLOCKED;
 
-  render_border(d, vp, state, t_since, acked);
-  render_state_text(d, vp, state, acked);
+  render_border(d, vp, state, t_since, acked, screensaver);
+  render_state_text(d, vp, state, acked, screensaver);
   if (cs.pinned) {
-    render_task_bar(d, vp, state, cs.tasks_active, cs.tasks_completed, acked);
-    render_subagent_bar(d, vp, state, cs.subagent_count, acked);
-    render_rx_flash(d, vp, state, now_us, cs.last_line_at_us);
+    render_task_bar(d, vp, state, cs.tasks_active, cs.tasks_completed, acked, screensaver);
+    render_subagent_bar(d, vp, state, cs.subagent_count, acked, screensaver);
+    // RX pulse fires on every byte received — the bridge pings every ~5s,
+    // so leaving it on in screensaver mode would be a periodic blink that
+    // defeats the dim. Skip it.
+    if (!screensaver) {
+      render_rx_flash(d, vp, state, now_us, cs.last_line_at_us);
+    }
   }
 }
 
@@ -1217,6 +1250,8 @@ extern "C" void app_main() {
 
     int64_t identify_until = 0;
     bool ack_active = false;
+    bool any_pinned = false;
+    bool any_active_state = false;  // pinned slot in a non-{IDLE,BLOCKED} state
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
       memcpy(local, g_clients, sizeof(local));
       identify_until = g_identify_until_us;
@@ -1224,12 +1259,14 @@ extern "C" void app_main() {
       // Auto-clear the ESP-wide ack when no slot is currently blocked.
       // Walk the live g_clients here (not the local copy) so the cleared
       // flag is visible to the next button press without a frame of delay.
+      // Same walk also feeds the screensaver eligibility check.
       bool any_blocked = false;
       for (int i = 0; i < TOTAL_SLOTS; i++) {
-        if (g_clients[i].pinned && g_clients[i].state == Status::BLOCKED) {
-          any_blocked = true;
-          break;
-        }
+        if (!g_clients[i].pinned) continue;
+        any_pinned = true;
+        const Status st = g_clients[i].state;
+        if (st == Status::BLOCKED) any_blocked = true;
+        if (st != Status::IDLE && st != Status::BLOCKED) any_active_state = true;
       }
       if (!any_blocked && g_blocked_ack_active) {
         g_blocked_ack_active = false;
@@ -1238,6 +1275,14 @@ extern "C" void app_main() {
 
       xSemaphoreGive(g_mutex);
     }
+
+    // Screensaver: kick in once everything pinned has been quiet (IDLE or
+    // BLOCKED) for SCREENSAVER_TIMEOUT_US, where "quiet" is reset by any
+    // state change or ack press. Skipped entirely when nothing is pinned
+    // — discoverability matters more than power savings on a fresh boot.
+    const bool screensaver_eligible = any_pinned && !any_active_state;
+    const bool screensaver = screensaver_eligible
+        && (now - g_last_activity_us) > SCREENSAVER_TIMEOUT_US;
 
     if (now < identify_until) {
       // Identify display owns the panel until the deadline. Snapshots still
@@ -1256,22 +1301,22 @@ extern "C" void app_main() {
       const ClientSnapshot &half_b = local[slot_index(p, SLOT_HALF_B)];
 
       if (full.pinned) {
-        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active);
+        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active, screensaver);
       } else if (half_a.pinned || half_b.pinned) {
         // Split mode: render each half. Unpinned sibling gets a placeholder.
         if (half_a.pinned) {
-          render_slot(*g_driver, viewport_for(p, SLOT_HALF_A), half_a, now, ack_active);
+          render_slot(*g_driver, viewport_for(p, SLOT_HALF_A), half_a, now, ack_active, screensaver);
         } else {
           render_unpinned_placeholder(*g_driver, viewport_for(p, SLOT_HALF_A));
         }
         if (half_b.pinned) {
-          render_slot(*g_driver, viewport_for(p, SLOT_HALF_B), half_b, now, ack_active);
+          render_slot(*g_driver, viewport_for(p, SLOT_HALF_B), half_b, now, ack_active, screensaver);
         } else {
           render_unpinned_placeholder(*g_driver, viewport_for(p, SLOT_HALF_B));
         }
       } else {
         // Nothing pinned on this panel — show UNKNOWN across its full viewport.
-        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active);
+        render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active, screensaver);
       }
     }
 
