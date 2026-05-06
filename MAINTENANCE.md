@@ -90,23 +90,36 @@ features.
 
 ### GitHub Actions
 
-All actions in `.github/workflows/*.yml` are **pinned to commit SHAs**
-(not tags) for supply-chain security. Tags are mutable; SHAs aren't.
-Dependabot rewrites both the SHA and the trailing version comment when
-bumping.
+All actions in `.github/workflows/*.yml` **must be pinned to commit
+SHAs** (not tags) for supply-chain security. Tags are mutable; SHAs
+aren't. Each `uses:` line carries the SHA followed by a trailing
+version comment, e.g.:
 
-| Action | Pinned at | Watch |
-| --- | --- | --- |
-| `actions/checkout` | `34e114876b0b11c390a56381ad16ebd13914f8d5` (v4.3.1) | <https://github.com/actions/checkout/releases> |
-| `espressif/esp-idf-ci-action` | `e6f5c74232b1ccd4c97ed641f1e48553853f1fd5` (v1.2.0) | <https://github.com/espressif/esp-idf-ci-action/releases> |
-| `actions/upload-artifact` | `ea165f8d65b6e75b540449e92b4886f43607fa02` (v4.6.2) | <https://github.com/actions/upload-artifact/releases> |
-| `actions/download-artifact` | `d3f86a106a0bac45b974a628896c90dbdf5c8093` (v4.3.0) | <https://github.com/actions/download-artifact/releases> |
-| `actions/configure-pages` | `983d7736d9b0ae728b81ab479565c72886d7745b` (v5.0.0) | <https://github.com/actions/configure-pages/releases> |
-| `actions/upload-pages-artifact` | `56afc609e74202658d3ffba0e8f6dda462b719fa` (v3.0.1) | <https://github.com/actions/upload-pages-artifact/releases> |
-| `actions/jekyll-build-pages` | `44a6e6beabd48582f863aeeb6cb2151cc1716697` (v1.0.13) | <https://github.com/actions/jekyll-build-pages/releases> |
-| `actions/github-script` | `3a2844b7e9c422d3c10d287c895573f7108da1b3` (v9.0.0) | <https://github.com/actions/github-script/releases> |
-| `actions/deploy-pages` | `d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e` (v4.0.5) | <https://github.com/actions/deploy-pages/releases> |
-| `softprops/action-gh-release` | `3bb12739c298aeb8a4eeaf626c5b8d85266b0e65` (v2.6.2) | <https://github.com/softprops/action-gh-release/releases> |
+```yaml
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+```
+
+Dependabot rewrites both the SHA and the trailing comment when
+bumping; that comment is purely human-readable and load-bearing
+nowhere — the SHA is the actual pin. **Don't accept a PR (Dependabot's
+or otherwise) that uses a tag (`@v6.0.2`) instead of a SHA.**
+
+The workflow files themselves are the source of truth for what's
+currently pinned. The actions in active use, with release feeds for
+watching upstream:
+
+| Action | Watch |
+| --- | --- |
+| `actions/checkout` | <https://github.com/actions/checkout/releases> |
+| `espressif/esp-idf-ci-action` | <https://github.com/espressif/esp-idf-ci-action/releases> |
+| `actions/upload-artifact` | <https://github.com/actions/upload-artifact/releases> |
+| `actions/download-artifact` | <https://github.com/actions/download-artifact/releases> |
+| `actions/configure-pages` | <https://github.com/actions/configure-pages/releases> |
+| `actions/upload-pages-artifact` | <https://github.com/actions/upload-pages-artifact/releases> |
+| `actions/jekyll-build-pages` | <https://github.com/actions/jekyll-build-pages/releases> |
+| `actions/github-script` | <https://github.com/actions/github-script/releases> |
+| `actions/deploy-pages` | <https://github.com/actions/deploy-pages/releases> |
+| `softprops/action-gh-release` | <https://github.com/softprops/action-gh-release/releases> |
 
 Dependabot opens a PR weekly with any available bumps. Read the
 upstream release notes (Dependabot links them in the PR body) and merge
