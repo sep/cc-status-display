@@ -15,7 +15,8 @@ adopt it.
 
 | Signal | Cadence | Lives in | What it means |
 | --- | --- | --- | --- |
-| **Dependabot PRs** | Mondays | `.github/dependabot.yml` | A pinned GitHub Action has a new upstream version. Review the diff + release notes; merge if green. |
+| **Dependabot PRs** | Mondays | `.github/dependabot.yml` | A pinned GitHub Action has a new upstream version. Minor/patch bumps batch into one PR; majors land as their own PR (intentional — see below). Review the diff + release notes; merge if green. |
+| **PR check** | On every PR | `.github/workflows/pr.yml` | Builds the firmware (per-board matrix), builds the Jekyll site, and round-trips an artifact through `upload-artifact` → `download-artifact`. The roundtrip is the only PR-time signal that those two actions are compatible across a major bump. |
 | **Smoke build** | Mondays | `.github/workflows/smoke.yml` | A weekly rebuild on currently-pinned versions. Red mail = supply-chain rot (managed-component went away, base image broke, etc.). |
 | **ESP-IDF canary** | Mondays | `.github/workflows/idf-canary.yml` | Fires only when Espressif tags an ESP-IDF release newer than our pin. Green = safe to bump. Red = migration work needed. |
 | **BOM review reminder** | Jan 1 + Jul 1 | `.github/workflows/bom-review.yml` | Opens a GitHub issue with a checklist for verifying `docs/build-your-own.md` against current vendor pricing/availability. Close the issue when the review is done and the page's "Last reviewed" date is bumped. |
@@ -112,6 +113,30 @@ upstream release notes (Dependabot links them in the PR body) and merge
 if the changes look benign. If something concerning shows up
 (behavioral changes, deprecated outputs we depend on), close the PR
 and pin to the previous SHA explicitly.
+
+**Minor/patch bumps batch into one PR; majors get their own.** This is
+deliberate. A bundle of seven simultaneous major bumps (which is what
+the very first Dependabot run produced) is too much surface to vet in
+one diff — release notes need individual review, and a regression in
+one of them taints the whole bundle. The split is configured in
+`dependabot.yml` via `groups.actions-minor-patch.update-types`.
+
+The `pr.yml` workflow runs on every PR (Dependabot's included) and
+covers most of the release pipeline — firmware build, Jekyll build,
+artifact roundtrip — but **does not exercise the actual deploy or
+release-publish steps**. For PRs that bump `actions/deploy-pages`,
+`actions/configure-pages`, `actions/upload-pages-artifact`, or
+`softprops/action-gh-release`, the only real verification is a
+dry-run release on a throwaway tag against the dependabot branch
+before merging:
+
+```sh
+git checkout dependabot/...
+git tag v0.0.0-test-$(date +%s)
+git push origin --tags
+# watch the release workflow run end-to-end, then delete the tag
+# and the auto-generated draft release.
+```
 
 ### Hardware
 

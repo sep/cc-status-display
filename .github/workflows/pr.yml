@@ -1,0 +1,111 @@
+name: PR check
+
+# Per-PR signal that exercises the parts of the release pipeline we can run
+# without actually publishing anything: the firmware build (per board), the
+# Jekyll site build, and an artifact upload→download roundtrip plus
+# manifest generation. The roundtrip is the only PR-time signal we have
+# that `actions/upload-artifact` and `actions/download-artifact` versions
+# are compatible with each other — which matters when Dependabot bumps
+# either of them across a major.
+#
+# What this DOES NOT cover (only a real release exercises these):
+#   - actions/deploy-pages          (deploys to GitHub Pages)
+#   - softprops/action-gh-release   (creates a GitHub Release)
+#   - actions/configure-pages       (only meaningful inside the deploy)
+#   - actions/upload-pages-artifact (only consumed by deploy-pages)
+#
+# For those, do a dry-run release on a throwaway tag against a branch
+# before merging the bump to main. See MAINTENANCE.md.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-firmware:
+    name: Build firmware (${{ matrix.board.id }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - id: thing_plus
+            macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+          - id: lonely_binary_n16r8
+            macro: BOARD_LONELY_BINARY_N16R8_GOLD
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: recursive
+
+      - uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
+        with:
+          esp_idf_version: v6.0
+          target: esp32s3
+          path: '.'
+          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}
+
+      - name: Stage binaries
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp build/bootloader/bootloader.bin out/bootloader.bin
+          cp build/partition_table/partition-table.bin out/partition-table.bin
+          APP_BIN=$(ls build/*.bin | head -n 1)
+          cp "$APP_BIN" out/firmware.bin
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: firmware-${{ matrix.board.id }}
+          path: out/
+
+  artifact-roundtrip:
+    name: Verify artifact roundtrip + manifest
+    needs: build-firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          path: artifacts/
+
+      - name: Verify expected files for each board
+        run: |
+          set -euo pipefail
+          for board_id in thing_plus lonely_binary_n16r8; do
+            for f in bootloader.bin partition-table.bin firmware.bin; do
+              path="artifacts/firmware-$board_id/$f"
+              if [ ! -s "$path" ]; then
+                echo "::error::missing or empty: $path"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Generate manifests (verify only — not deployed)
+        run: |
+          set -euo pipefail
+          for board_id in thing_plus lonely_binary_n16r8; do
+            python3 scripts/make_manifest.py \
+              --board-id "$board_id" \
+              --version "v0.0.0-pr" \
+              > "artifacts/firmware-$board_id/manifest.json"
+            # round-trip the JSON to make sure it parsed cleanly.
+            python3 -m json.tool < "artifacts/firmware-$board_id/manifest.json" > /dev/null
+          done
+
+  build-site:
+    name: Build Jekyll site (no deploy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
+        with:
+          source: ./docs
+          destination: ./_site
