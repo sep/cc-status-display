@@ -139,6 +139,7 @@ static SemaphoreHandle_t g_driver_mutex   = nullptr; // guards g_driver during s
 static Hub75Driver      *g_driver         = nullptr;
 static int64_t           g_identify_until_us = 0;    // 0 = no identify pending; else esp_timer_get_time deadline
 static bool              g_blocked_ack_active = false;
+static volatile int64_t  g_last_rx_us         = 0;    // most recent serial-byte arrival; drives render_conn_dot
 // ESP-wide ack flag. Set by the ack button when at least one slot is BLOCKED.
 // Causes BLOCKED renders to render in a calm, non-strobing variant. Cleared
 // automatically when no slot is currently BLOCKED — so a new blocked event
@@ -637,6 +638,7 @@ static void serial_reader_task(void *) {
     esp_task_wdt_reset();
     const int n = usb_serial_jtag_read_bytes(chunk, sizeof(chunk), pdMS_TO_TICKS(1000));
     if (n <= 0) continue;
+    g_last_rx_us = esp_timer_get_time();
     for (int i = 0; i < n; i++) {
       const char c = static_cast<char>(chunk[i]);
       if (c == '\r') continue;
@@ -1088,13 +1090,24 @@ static void render_identify(Hub75Driver &d) {
   }
 }
 
-// USB connection indicator — panel-level, drawn at the bottom-left of the
-// whole framebuffer (not per-slot, since it's a device-global property).
-static void render_conn_dot(Hub75Driver &d) {
+// Bridge-heartbeat indicator — single pixel at the bottom-left of the
+// framebuffer. Green if a byte from the host arrived recently; red-orange
+// otherwise. The bridge sends a ping every ~5s by default (see
+// cc-status-bridge/docs/FIRMWARE.md), so anything older than ~10s
+// implies the bridge has gone away — crashed, host asleep, or cable
+// unplugged. We deliberately don't use usb_serial_jtag_is_connected()
+// here: it tracks USB SOF packets, which keep arriving as long as a
+// powered, awake host has the device enumerated, and so it can't
+// distinguish "bridge talking to me" from "USB still plugged in but
+// the bridge process is dead."
+static constexpr int64_t CONN_FRESH_THRESHOLD_US = 10'000'000;
+
+static void render_conn_dot(Hub75Driver &d, int64_t now_us) {
   const int16_t h = static_cast<int16_t>(d.get_height());
-  const bool connected = usb_serial_jtag_is_connected();
-  if (connected) d.set_pixel(2, h - 2, 0, 80, 16);
-  else           d.set_pixel(2, h - 2, 80, 8, 0);
+  const int64_t last = g_last_rx_us;
+  const bool fresh = (last > 0) && (now_us - last < CONN_FRESH_THRESHOLD_US);
+  if (fresh) d.set_pixel(2, h - 2, 0, 80, 16);
+  else       d.set_pixel(2, h - 2, 80, 8, 0);
 }
 
 // ======================================================================
@@ -1230,7 +1243,7 @@ extern "C" void app_main() {
       // Identify display owns the panel until the deadline. Snapshots still
       // accumulate via apply_state_update; they're just not rendered yet.
       render_identify(*g_driver);
-      render_conn_dot(*g_driver);
+      render_conn_dot(*g_driver, now);
       g_driver->flip_buffer();
       xSemaphoreGive(g_driver_mutex);
       vTaskDelay(pdMS_TO_TICKS(33));
@@ -1262,7 +1275,7 @@ extern "C" void app_main() {
       }
     }
 
-    render_conn_dot(*g_driver);
+    render_conn_dot(*g_driver, now);
 
     g_driver->flip_buffer();
 
