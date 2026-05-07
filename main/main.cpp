@@ -227,7 +227,10 @@ static void send_pong(int64_t seq) {
   }
 
   const int64_t uptime_ms = esp_timer_get_time() / 1000;
-  char buf[2048];
+  // Static so we don't burn 2 KB of serial_reader_task's stack every ping.
+  // Safe because send_pong only ever runs on that one task — handle_ping
+  // is called from handle_line which is called from serial_reader_task.
+  static char buf[2048];
   int n = snprintf(buf, sizeof(buf),
       "{\"type\":\"pong\",\"seq\":%lld,\"panel_count\":%d,\"first_id\":%d,\"clients\":{",
       static_cast<long long>(seq), g_panel_count, g_first_id);
@@ -1224,7 +1227,11 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj));
   }
 
-  xTaskCreate(serial_reader_task, "serial_rx", 4096, nullptr, 5, nullptr);
+  // 6 KB stack: handle_ping → send_pong's worst-case frame is ~3.5 KB
+  // (large local pong buffer + snapshot of g_clients + serial_reader's own
+  // line/chunk buffers). 4 KB was right at the edge and overflowed under
+  // the v1.2 full-table pong format.
+  xTaskCreate(serial_reader_task, "serial_rx", 6144, nullptr, 5, nullptr);
   xTaskCreate(ack_button_task,    "ack_btn",   3072, nullptr, 4, nullptr);
 
   ESP_ERROR_CHECK(esp_task_wdt_add(nullptr));
