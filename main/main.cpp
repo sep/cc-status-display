@@ -1188,6 +1188,21 @@ extern "C" void app_main() {
   gpio_config(&oe_cfg);
   gpio_set_level(static_cast<gpio_num_t>(BOARD_PINS.oe), 1);
 
+  // Auxiliary ground pin: held LOW for boards that only break out one
+  // physical GND but need a second reference for HUB75's two IDC GND pins.
+  // `if constexpr` so the shift never instantiates with the -1 sentinel
+  // on boards where this is disabled.
+  if constexpr (BOARD_PINS.aux_gnd >= 0) {
+    gpio_config_t gnd_cfg = {};
+    gnd_cfg.pin_bit_mask = 1ULL << BOARD_PINS.aux_gnd;
+    gnd_cfg.mode = GPIO_MODE_OUTPUT;
+    gnd_cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+    gnd_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    gnd_cfg.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&gnd_cfg);
+    gpio_set_level(static_cast<gpio_num_t>(BOARD_PINS.aux_gnd), 0);
+  }
+
   init_font5x7();
   // Firmware version is built from version.txt + (for non-release
   // builds) a 6-char commit SHA appended as "+abc123". CI release

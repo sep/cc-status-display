@@ -33,12 +33,20 @@
 // across every slot driven by this ESP. Default of 0 reuses the BOOT
 // button on most ESP32-S3 dev boards (no extra hardware needed). Set to
 // -1 to disable the feature entirely.
+//
+// `aux_gnd` is a GPIO held permanently LOW at boot, intended to provide
+// a second ground reference for HUB75's IDC GND pins on dev boards that
+// only break out one GND pin to their headers. It's set up as a normal
+// push-pull output sinking to 0; current is signal-reference scale (a
+// few mA, well within ESP32-S3's per-pin 40 mA limit) since the panel's
+// LED-current return is on a separate supply. Set to -1 to disable.
 struct BoardPins {
   int8_t r1, g1, b1;
   int8_t r2, g2, b2;
   int8_t a, b, c, d, e;
   int8_t clk, lat, oe;
   int8_t ack_button;
+  int8_t aux_gnd;
 };
 
 // ============================================================================
@@ -70,9 +78,14 @@ constexpr BoardPins BOARD_PINS = {
     // GPIO 0 is the BOOT button AND the onboard green status LED on this
     // board. The button still works as input (the press shorts hard to
     // ground), but the LED's current path may make idle reads noisy. If
-    // you see false-positive ack triggers, set ack_button = 42 and wire
-    // a momentary switch from GPIO 42 to GND on the left header.
+    // you see false-positive ack triggers, set ack_button = -1 and wire
+    // a dedicated momentary switch from any free GPIO to GND.
     .ack_button = 0,
+    // The Thing Plus only breaks out a single GND pin, but HUB75 has two
+    // IDC ground pins (4 and 16) that both want a reference. Drive GPIO
+    // 42 LOW at boot to provide the second ground without needing a
+    // soldered jumper or a breakout strip. See docs/boards/thing_plus.md.
+    .aux_gnd = 42,
 };
 constexpr const char *BOARD_LABEL = "SparkFun Thing Plus ESP32-S3";
 
@@ -91,6 +104,7 @@ constexpr BoardPins BOARD_PINS = {
     .a  = 10, .b  = 11, .c  = 12, .d = 13, .e = -1,
     .clk = 14, .lat = 15, .oe = 16,
     .ack_button = 0,  // BOOT button. Clean GPIO 0 (no LED conflict).
+    .aux_gnd    = -1, // Lonely Binary breaks out two GND pins on the right header.
 };
 constexpr const char *BOARD_LABEL = "Lonely Binary ESP32-S3 N16R8 Gold Edition";
 

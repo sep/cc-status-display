@@ -28,24 +28,24 @@ assignments for this board are baked in — don't substitute "conventional"
 HUB75 pin orderings or colors will be wrong. Pin 8 (E) on the panel's IDC
 is unused on a 1/16-scan panel; leave it disconnected.
 
-| IDC pin # | Color / signal           | ESP32 GPIO   |
-| --------- | ------------------------ | ------------ |
-| 1         | R (top half)             | GPIO 1       |
-| 2         | B (top half) ★           | GPIO 2       |
-| 3         | G (top half) ★           | GPIO 4       |
-| 4         | GND                      | any GND pin  |
-| 5         | R (bottom half)          | GPIO 5       |
-| 6         | B (bottom half) ★        | GPIO 6       |
-| 7         | G (bottom half) ★        | GPIO 7       |
-| 8         | E (NC on 1/16-scan)      | —            |
-| 9         | A (row select)           | GPIO 10      |
-| 10        | B (row select)           | GPIO 14      |
-| 11        | C (row select)           | GPIO 15      |
-| 12        | D (row select)           | GPIO 16      |
-| 13        | CLK                      | GPIO 17      |
-| 14        | LAT                      | GPIO 18      |
-| 15        | OE                       | GPIO 21      |
-| 16        | GND                      | any GND pin  |
+| IDC pin # | Color / signal           | ESP32 GPIO    |
+| --------- | ------------------------ | ------------- |
+| 1         | R (top half)             | GPIO 1        |
+| 2         | B (top half) ★           | GPIO 2        |
+| 3         | G (top half) ★           | GPIO 4        |
+| 4         | GND                      | **GPIO 42** ◆ |
+| 5         | R (bottom half)          | GPIO 5        |
+| 6         | B (bottom half) ★        | GPIO 6        |
+| 7         | G (bottom half) ★        | GPIO 7        |
+| 8         | E (NC on 1/16-scan)      | —             |
+| 9         | A (row select)           | GPIO 10       |
+| 10        | B (row select)           | GPIO 14       |
+| 11        | C (row select)           | GPIO 15       |
+| 12        | D (row select)           | GPIO 16       |
+| 13        | CLK                      | GPIO 17       |
+| 14        | LAT                      | GPIO 18       |
+| 15        | OE                       | GPIO 21       |
+| 16        | GND                      | board GND pin |
 
 ★ **Panel-quirk note:** on the WaveShare RGB-Matrix-P2.5-64×32 panel, IDC
 pins 2 and 3 (and 6 and 7) are **swapped vs the HUB75 standard** — pin 2
@@ -54,6 +54,17 @@ compensates so that the natural sequential wiring above renders colors
 correctly. If you substitute a different (HUB75-spec-compliant) panel,
 edit `main/board_config.h` to swap `g1↔b1` and `g2↔b2` back to
 conventional order.
+
+◆ **Second-ground note:** the SparkFun Thing Plus only breaks out a
+single GND pin to its headers, but HUB75 has two IDC ground pins (4 and
+16) that both need a reference. Rather than asking you to solder a
+jumper or scrounge a breakout strip, the firmware drives **GPIO 42** to
+0 V at boot — wire IDC pin 4 to GPIO 42 the same way you'd wire any
+other signal pin and you've got two grounds. The current through this
+"GPIO ground" is signal-reference scale (a few mA) since the panel's
+LED-current return rides its own 5 V supply, so it's well within the
+ESP32-S3's 40 mA per-pin limit. Configured in `main/board_config.h` as
+`BoardPins.aux_gnd`.
 
 ### Board pinout reference
 
