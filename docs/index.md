@@ -6,7 +6,7 @@ title: ClaudePanel — Display Firmware
 # ClaudePanel — Display Firmware
 
 > **Not sure where to start?** Begin at the
-> [plugin site](https://fluffy-adventure-o3kn381.pages.github.io/) — that's
+> [plugin site](https://sep.github.io/cc-status-plugin/) — that's
 > the system overview and install walkthrough that gets your Claude Code
 > session talking to the panel.
 
@@ -70,9 +70,9 @@ with the `.tar.gz` archives attached to each release.
 
 ## Related projects
 
-- **[Plugin](https://fluffy-adventure-o3kn381.pages.github.io/)** —
+- **[Plugin](https://sep.github.io/cc-status-plugin/)** —
   system entry point; install starts here.
-- **[Bridge](https://miniature-dollop-g4kpjol.pages.github.io/)** —
+- **[Bridge](https://sep.github.io/cc-status-bridge/)** —
   daemon that translates Claude Code events into wire frames for the
   firmware.
 - **[Wire-protocol spec](https://github.com/sep/cc-status-bridge/blob/main/FIRMWARE.md)**
