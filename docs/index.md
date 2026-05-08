@@ -5,6 +5,11 @@ title: ClaudePanel — Display Firmware
 
 # ClaudePanel — Display Firmware
 
+> **Not sure where to start?** Begin at the
+> [plugin site](https://fluffy-adventure-o3kn381.pages.github.io/) — that's
+> the system overview and install walkthrough that gets your Claude Code
+> session talking to the panel.
+
 Flash the ESP32-S3 firmware that drives the ClaudePanel external status
 display. Plug your board in via USB-C, pick it below, click **Flash**.
 
@@ -21,14 +26,11 @@ display. Plug your board in via USB-C, pick it below, click **Flash**.
   </esp-web-install-button>
 </p>
 
-Wiring & pinouts: [Thing Plus](boards/thing_plus.html) ·
-[Lonely Binary](boards/lonely_binary_n16r8.html). New to ClaudePanel? Start
-at the [plugin site](https://fluffy-adventure-o3kn381.pages.github.io/) —
-that's the system overview and install walkthrough that gets your Claude
-Code session talking to the panel. Don't have a board yet?
-[Build your own](build-your-own.html) walks the parts list (~$50–80 total).
-To add support for a new board, see
-[CONTRIBUTING.md](https://github.com/sep/cc-status-display/blob/main/CONTRIBUTING.md).
+- **Wiring & pinouts:** [Thing Plus](boards/thing_plus.html) ·
+  [Lonely Binary](boards/lonely_binary_n16r8.html)
+- **[Build your own](build-your-own.html)** — parts list, ~$50–80 total.
+- **[Adding a new board](https://github.com/sep/cc-status-display/blob/main/CONTRIBUTING.md)**
+  (CONTRIBUTING.md)
 
 ## Reading the panel
 
