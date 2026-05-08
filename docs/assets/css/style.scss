@@ -1,0 +1,44 @@
+---
+# Front matter is required so Jekyll picks this file up and converts the
+# SCSS to CSS at build time. The Cayman theme's default.html layout
+# pulls /assets/css/style.css automatically.
+---
+
+@import "{{ site.theme }}";
+
+// ---------------------------------------------------------------------------
+// .btn override for the page body.
+//
+// Cayman's stock .btn is white-on-translucent-white — designed to sit on the
+// dark blue/green page-header gradient. Inside the white .main-content body,
+// the buttons are rendered correctly-sized and clickable but completely
+// invisible. Override only when nested under .main-content so the header
+// "View on GitHub" buttons stay untouched.
+// ---------------------------------------------------------------------------
+.main-content {
+  .btn {
+    color: #fff;
+    background-color: #155799;  // Cayman's header-gradient blue
+    border-color: #155799;
+
+    &:hover {
+      color: #fff;
+      background-color: #0f3f6e;
+      border-color: #0f3f6e;
+    }
+  }
+}
+
+// Row of primary call-to-action buttons under the H1: flash + flash + build.
+// Wraps gracefully on narrow viewports.
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1.5rem 0;
+
+  // Cayman's stock `.btn + .btn { margin-left: 1rem; }` would double up
+  // with the flex gap. Null the per-button margins inside the row.
+  .btn { margin: 0; }
+}
