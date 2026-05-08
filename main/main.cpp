@@ -144,6 +144,22 @@ static volatile int64_t  g_last_activity_us   = 0;    // most recent state-chang
 static constexpr int64_t SCREENSAVER_TIMEOUT_US = 5LL * 60LL * 1'000'000LL;  // 5 minutes
 static constexpr int     SCREENSAVER_DIM_NUM     = 1;
 static constexpr int     SCREENSAVER_DIM_DEN     = 10;                       // 10% of bright
+
+// AFK = forced-screensaver state. Two independent triggers ORed into
+// the screensaver flag in the render loop:
+//
+//  - g_afk_manual: toggled by the ack button when no slot is blocked.
+//                  Persists across rx events — bytes arriving from the
+//                  bridge don't clear it. Cleared by another button
+//                  press, or by an ack press while a slot is blocked.
+//  - rx silence:   computed inline in the render loop. If no bytes
+//                  have arrived for AFK_AUTO_THRESHOLD_US (≈ 6× the
+//                  bridge's 5 s ping cadence), force screensaver. This
+//                  catches "Pause subscription" tray clicks, bridge
+//                  crashes, host sleep, and USB unplug with the same
+//                  dim/calm visual. Self-clears on the next byte.
+static bool              g_afk_manual = false;
+static constexpr int64_t AFK_AUTO_THRESHOLD_US = 30LL * 1'000'000LL;
 // ESP-wide ack flag. Set by the ack button when at least one slot is BLOCKED.
 // Causes BLOCKED renders to render in a calm, non-strobing variant. Cleared
 // automatically when no slot is currently BLOCKED — so a new blocked event
@@ -720,8 +736,14 @@ static void ack_button_task(void *) {
 
     if (current) continue;  // we only act on press (LOW), not release
 
-    // Pressed: engage ack iff at least one slot is currently blocked.
-    // Either way, the press counts as user activity for screensaver purposes.
+    // Pressed. Two-mode handler:
+    //  - Some slot is blocked: silence the strobe (existing behavior).
+    //                          Also clear AFK if it was on, so the user
+    //                          comes back to a present-but-quiet panel
+    //                          in one press.
+    //  - No slot is blocked:   toggle manual AFK, dimming the panel
+    //                          for "I'm walking away" use.
+    // Either way, the press counts as user activity for the timer.
     g_last_activity_us = esp_timer_get_time();
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
       bool any_blocked = false;
@@ -731,9 +753,18 @@ static void ack_button_task(void *) {
           break;
         }
       }
-      if (any_blocked && !g_blocked_ack_active) {
-        g_blocked_ack_active = true;
-        ESP_LOGI(TAG, "ack: silencing blocked alarm");
+      if (any_blocked) {
+        if (!g_blocked_ack_active) {
+          g_blocked_ack_active = true;
+          ESP_LOGI(TAG, "ack: silencing blocked alarm");
+        }
+        if (g_afk_manual) {
+          g_afk_manual = false;
+          ESP_LOGI(TAG, "ack: AFK off (block present)");
+        }
+      } else {
+        g_afk_manual = !g_afk_manual;
+        ESP_LOGI(TAG, "ack: AFK %s", g_afk_manual ? "on" : "off");
       }
       xSemaphoreGive(g_mutex);
     }
@@ -1298,13 +1329,25 @@ extern "C" void app_main() {
       xSemaphoreGive(g_mutex);
     }
 
-    // Screensaver: kick in once everything pinned has been quiet (IDLE or
-    // BLOCKED) for SCREENSAVER_TIMEOUT_US, where "quiet" is reset by any
-    // state change or ack press. Skipped entirely when nothing is pinned
-    // — discoverability matters more than power savings on a fresh boot.
+    // Screensaver activation has three independent triggers, ORed:
+    //
+    //  1) Manual AFK (ack button, no blocks present): user explicitly
+    //     dimmed the panel. Persists until they press again.
+    //  2) Auto AFK (rx silence > AFK_AUTO_THRESHOLD_US): the host has
+    //     gone away — paused, crashed, sleeping, or unplugged. Auto-
+    //     clears on the next byte.
+    //  3) Quiet timeout (everything pinned has been IDLE or BLOCKED for
+    //     SCREENSAVER_TIMEOUT_US, no activity from state changes or ack
+    //     presses): the original "user walked away mid-session" path.
+    //     Skipped if nothing is pinned, so a fresh boot doesn't dim
+    //     before the user has seen the panel.
     const bool screensaver_eligible = any_pinned && !any_active_state;
-    const bool screensaver = screensaver_eligible
-        && (now - g_last_activity_us) > SCREENSAVER_TIMEOUT_US;
+    const bool afk_auto = (g_last_rx_us > 0)
+        && (now - g_last_rx_us) > AFK_AUTO_THRESHOLD_US;
+    const bool screensaver = g_afk_manual
+        || afk_auto
+        || (screensaver_eligible
+            && (now - g_last_activity_us) > SCREENSAVER_TIMEOUT_US);
 
     if (now < identify_until) {
       // Identify display owns the panel until the deadline. Snapshots still

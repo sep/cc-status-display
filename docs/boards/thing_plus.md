@@ -119,19 +119,46 @@ Chrome, Edge, or another Chromium-based browser is required.
 
 ## The ack button
 
-The **BOOT button** on your dev board doubles as an "I see it" button for
-the panel's BLOCKED state. When something blocks the Claude session and
-the panel starts strobing red, press BOOT once to:
+The **BOOT button** on your dev board does two different things depending
+on whether anything is blocking when you press it.
+
+### When something is blocked (the alarm case)
+
+Press once to:
 
 - Stop the strobing animation across every blocked slot driven by this ESP.
 - Dim the BLOCKED text and indicators to a muted appearance.
-- Keep the BLOCKED state visible (so you can walk away from your desk and
-  still see "yes, still waiting on me"), but without the cortisol-spiking
-  alarm.
+- Keep the BLOCKED state visible (so you can walk away and still see "yes,
+  still waiting on me"), but without the cortisol-spiking alarm.
 
-The ack auto-clears once no slot on this ESP is blocked anymore, so the
-next blocked event re-alarms fresh. Pressing the button multiple times is
-idempotent — frustration-smash safe.
+The silence auto-clears once no slot on this ESP is blocked anymore, so
+the next blocked event re-alarms fresh. Pressing the button multiple
+times while still blocked is idempotent — frustration-smash safe. If you
+press it while AFK was on (see below), the press also exits AFK so you
+come back to a present-but-quiet panel in one click.
+
+### When nothing is blocked (the "I'm walking away" case)
+
+Press once to **toggle AFK mode**. AFK dims the entire panel to ~10%
+brightness with no animation, no strobing, no RX pulses. If a BLOCKED
+state arrives while AFK is on, it renders in the same calm dim style —
+your neighbors don't get a flashing red light show while you're at lunch.
+Press the button again on your way back to exit AFK.
+
+AFK persists across state changes — the panel stays dim until you press
+again, even if Claude finishes a long-running task while you're away.
+
+### Auto-AFK on bridge silence
+
+The panel also dims itself automatically when no bytes have arrived from
+the bridge for 30 seconds — long enough to rule out a hiccup, short
+enough to feel responsive. This catches "Pause subscription" tray clicks,
+bridge crashes, host sleep, and USB unplug with the same calm visual.
+Auto-AFK self-clears the moment any byte arrives again.
+
+The bottom-left bridge-heartbeat pixel goes red 10 seconds into a silence
+and stays red until bytes resume; auto-AFK kicks in 20 seconds after
+that. Two stages, easy to read.
 
 **Thing Plus caveat:** on this board, GPIO 0 drives both the BOOT button
 and the onboard green status LED. The button still works (a press shorts
