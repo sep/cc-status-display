@@ -1,0 +1,95 @@
+name: Deploy docs
+
+# Re-publishes the GitHub Pages site when docs/** changes on main, without
+# requiring a firmware version bump. Firmware binaries on the deployed site
+# come from the most recent release tag — pulled down with `gh release
+# download` and injected into _site exactly the way release.yml does, so
+# the flasher buttons keep working between firmware releases.
+#
+# If no release exists yet (fresh repo), the site is still deployed but the
+# /firmware/ directory is empty. The flash buttons will 404 their manifest
+# until the first real release lands; better than failing the deploy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'scripts/make_manifest.py'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# Serialize Pages deploys across this workflow and release.yml's publish
+# job. The two are unlikely to fire concurrently in practice (one fires on
+# tag push, the other on docs/** push) but the group prevents either from
+# overwriting an in-flight deploy from the other.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  publish:
+    name: Build site + redeploy Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Pull firmware tarballs from the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          LATEST_TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "::warning::No releases yet; site will deploy without firmware artifacts."
+            echo "release_tag=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "release_tag=$LATEST_TAG" >> "$GITHUB_ENV"
+          for board_id in thing_plus lonely_binary_n16r8; do
+            mkdir -p "artifacts/$board_id"
+            gh release download "$LATEST_TAG" \
+              -p "${board_id}-*.tar.gz" \
+              --dir "artifacts/$board_id"
+          done
+
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
+
+      - name: Build Jekyll site (Cayman theme, matches plugin/bridge)
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
+        with:
+          source: ./docs
+          destination: ./_site
+
+      - name: Inject firmware binaries + manifests into Jekyll output
+        if: env.release_tag != ''
+        run: |
+          set -euo pipefail
+          # actions/jekyll-build-pages runs in a Docker container as a
+          # different UID; reclaim ownership so subsequent runner-uid steps
+          # can mkdir/cp into _site. Same pattern as release.yml.
+          sudo chown -R "$(id -u):$(id -g)" _site
+          for board_id in thing_plus lonely_binary_n16r8; do
+            mkdir -p "_site/firmware/$board_id"
+            tar -xzf artifacts/"$board_id"/*.tar.gz -C "_site/firmware/$board_id/"
+            python3 scripts/make_manifest.py \
+              --board-id "$board_id" \
+              --version "${{ env.release_tag }}" \
+              > "_site/firmware/$board_id/manifest.json"
+          done
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: _site
+
+      - id: deploy-pages
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0

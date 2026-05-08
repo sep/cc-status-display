@@ -17,6 +17,7 @@ adopt it.
 | --- | --- | --- | --- |
 | **Dependabot PRs** | Mondays | `.github/dependabot.yml` | A pinned GitHub Action has a new upstream version. Minor/patch bumps batch into one PR; majors land as their own PR (intentional — see below). Review the diff + release notes; merge if green. |
 | **PR check** | On every PR | `.github/workflows/pr.yml` | Builds the firmware (per-board matrix), builds the Jekyll site, and round-trips an artifact through `upload-artifact` → `download-artifact`. The roundtrip is the only PR-time signal that those two actions are compatible across a major bump. |
+| **Docs deploy** | On `docs/**` push to `main` | `.github/workflows/docs.yml` | Rebuilds and re-publishes the GitHub Pages site without a firmware version bump. Pulls firmware tarballs from the latest release tag and injects them into `_site` so the flash buttons keep working between firmware releases. Serialized with `release.yml`'s Pages-deploy via the shared `pages-deploy` concurrency group. |
 | **Smoke build** | Mondays | `.github/workflows/smoke.yml` | A weekly rebuild on currently-pinned versions. Red mail = supply-chain rot (managed-component went away, base image broke, etc.). |
 | **ESP-IDF canary** | Mondays | `.github/workflows/idf-canary.yml` | Fires only when Espressif tags an ESP-IDF release newer than our pin. Green = safe to bump. Red = migration work needed. |
 | **BOM review reminder** | Jan 1 + Jul 1 | `.github/workflows/bom-review.yml` | Opens a GitHub issue with a checklist for verifying `docs/build-your-own.md` against current vendor pricing/availability. Close the issue when the review is done and the page's "Last reviewed" date is bumped. |
@@ -227,8 +228,16 @@ Loose semver, scoped to firmware behavior end users will notice:
 - **Minor (vX.Y.0)** — a new state in the lexicon, a new dispatch
   type, a new board preset, a new visual feature (like the ack
   button or task counting). Additive and backward-compatible.
-- **Patch (vX.Y.Z)** — bug fixes, panel-quirk compensations, doc
-  edits, dependency bumps that don't change behavior.
+- **Patch (vX.Y.Z)** — bug fixes, panel-quirk compensations,
+  dependency bumps that don't change behavior.
+
+**Doc-only edits don't need a version bump at all.** The
+`.github/workflows/docs.yml` workflow auto-redeploys the GitHub Pages
+site whenever `docs/**` changes on `main`, pulling the most recent
+release's firmware tarballs from GitHub Releases so the flash buttons
+keep working. Push the doc commit, the site updates within ~2 minutes,
+no tag involved. Reserve patch bumps for things that actually change
+the firmware binary.
 
 ### Pre-1.0
 

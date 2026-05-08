@@ -83,6 +83,12 @@ jobs:
     name: Publish site + release
     needs: build
     runs-on: ubuntu-latest
+    # Serialize Pages deploys with the docs-only deploy workflow so a
+    # tag push during a doc-edit deploy (or vice versa) can't have both
+    # racing to overwrite _site.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     permissions:
       contents: write   # to create the GitHub Release
       pages: write      # to deploy GitHub Pages
