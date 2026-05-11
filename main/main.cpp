@@ -736,14 +736,24 @@ static void ack_button_task(void *) {
 
     if (current) continue;  // we only act on press (LOW), not release
 
-    // Pressed. Two-mode handler:
-    //  - Some slot is blocked: silence the strobe (existing behavior).
-    //                          Also clear AFK if it was on, so the user
-    //                          comes back to a present-but-quiet panel
-    //                          in one press.
-    //  - No slot is blocked:   toggle manual AFK, dimming the panel
-    //                          for "I'm walking away" use.
-    // Either way, the press counts as user activity for the timer.
+    // Pressed. Three concerns to handle, in this priority order:
+    //
+    //  1. AFK is currently on → exit AFK (the user is back). If a block
+    //     happens to be present and not yet silenced, auto-silence it
+    //     too: waking the panel shouldn't immediately start strobing
+    //     for something the user has been staring at while AFK.
+    //
+    //  2. A block is loud (present, not silenced) → silence the strobe.
+    //     Calm steady glow takes over. This is the classic "I see it"
+    //     gesture.
+    //
+    //  3. Otherwise → toggle manual AFK. Critically, "otherwise"
+    //     INCLUDES "blocked but already silenced" — so the user can
+    //     press once to silence a BLOCKED alarm and a second time to
+    //     go AFK before walking away from a hard question.
+    //
+    // Either way, the press counts as user activity for the screensaver
+    // timer.
     g_last_activity_us = esp_timer_get_time();
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
       bool any_blocked = false;
@@ -753,15 +763,16 @@ static void ack_button_task(void *) {
           break;
         }
       }
-      if (any_blocked) {
-        if (!g_blocked_ack_active) {
+      if (g_afk_manual) {
+        g_afk_manual = false;
+        ESP_LOGI(TAG, "ack: AFK off");
+        if (any_blocked && !g_blocked_ack_active) {
           g_blocked_ack_active = true;
-          ESP_LOGI(TAG, "ack: silencing blocked alarm");
+          ESP_LOGI(TAG, "ack: auto-silencing block on wake");
         }
-        if (g_afk_manual) {
-          g_afk_manual = false;
-          ESP_LOGI(TAG, "ack: AFK off (block present)");
-        }
+      } else if (any_blocked && !g_blocked_ack_active) {
+        g_blocked_ack_active = true;
+        ESP_LOGI(TAG, "ack: silencing blocked alarm");
       } else {
         g_afk_manual = !g_afk_manual;
         ESP_LOGI(TAG, "ack: AFK %s", g_afk_manual ? "on" : "off");

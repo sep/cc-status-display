@@ -117,34 +117,28 @@ Chrome, Edge, or another Chromium-based browser is required.
 
 ## The ack button
 
-The **BOOT button** on your dev board does two different things depending
-on whether anything is blocking when you press it.
+The **BOOT button** on your dev board is a single context-sensitive ack —
+each press resolves the loudest thing on the panel.
 
-### When something is blocked (the alarm case)
+### What happens on each press
 
-Press once to:
+1. **Loud `BLOCKED` strobe?** First press silences it. The strobing
+   stops, BLOCKED text + indicators drop to a calm muted appearance, the
+   state stays visible. The silence auto-clears once no slot on this ESP
+   is blocked anymore, so the next blocked event re-alarms fresh.
+2. **Already silenced, or nothing blocked?** The press toggles AFK
+   instead. So "I see it, going to lunch" is two presses while standing
+   at the panel: silence, then AFK. The panel dims to ~10% with no
+   animation, no strobing, no RX pulses. Even a fresh `BLOCKED`
+   arriving while you're gone renders calm and dim — neighbors get
+   nothing but a faint glow.
+3. **Coming back?** Press once to exit AFK. If a block is still active,
+   it's auto-silenced on wake so the panel doesn't start strobing the
+   moment you sit down.
 
-- Stop the strobing animation across every blocked slot driven by this ESP.
-- Dim the BLOCKED text and indicators to a muted appearance.
-- Keep the BLOCKED state visible (so you can walk away and still see "yes,
-  still waiting on me"), but without the cortisol-spiking alarm.
-
-The silence auto-clears once no slot on this ESP is blocked anymore, so
-the next blocked event re-alarms fresh. Pressing the button multiple
-times while still blocked is idempotent — frustration-smash safe. If you
-press it while AFK was on (see below), the press also exits AFK so you
-come back to a present-but-quiet panel in one click.
-
-### When nothing is blocked (the "I'm walking away" case)
-
-Press once to **toggle AFK mode**. AFK dims the entire panel to ~10%
-brightness with no animation, no strobing, no RX pulses. If a BLOCKED
-state arrives while AFK is on, it renders in the same calm dim style —
-your neighbors don't get a flashing red light show while you're at lunch.
-Press the button again on your way back to exit AFK.
-
-AFK persists across state changes — the panel stays dim until you press
-again, even if Claude finishes a long-running task while you're away.
+AFK itself persists across state changes — the panel stays dim until you
+press again, even if Claude finishes a long-running task while you're
+away.
 
 ### Auto-AFK on bridge silence
 

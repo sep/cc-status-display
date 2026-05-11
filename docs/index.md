@@ -40,15 +40,21 @@ front:
 
 - **`BLOCKED` strobes red.** The one state that demands your attention —
   strobes hard until acknowledged so you can't miss it from across the room.
-- **The dev board's BOOT button silences the strobe.** Press once and
-  BLOCKED drops into a calm steady glow. The state stays visible, you just
-  stop being yelled at. Auto-clears the next time nothing on the panel is
-  blocked, so the next blocked event re-alarms fresh.
-- **Same button = AFK toggle when nothing's blocked.** Press it on your way
-  out to lunch; the panel dims to ~10% with no animation, no strobing, no
-  RX pulses — even if a `BLOCKED` arrives while you're gone, your neighbors
-  get nothing but a faint glow. Press again on your way back to wake it.
-  AFK persists across state changes, so Claude finishing a task while
+- **The dev board's BOOT button is a single context-sensitive ack.** What
+  it does depends on what's loudest at the moment of the press:
+    1. **Loud `BLOCKED` strobe?** First press silences it — BLOCKED drops
+       into a calm steady glow. The state stays visible, you just stop
+       being yelled at. Auto-clears the next time nothing on the panel is
+       blocked, so the next blocked event re-alarms fresh.
+    2. **Already silenced, or nothing blocked?** The press toggles AFK
+       instead. So "I see it, going to lunch" is two presses: silence,
+       then AFK. The panel dims to ~10% with no animation, no strobing,
+       no RX pulses — even if a fresh `BLOCKED` arrives while you're
+       gone, your neighbors get nothing but a faint glow.
+    3. **Coming back?** Press once to exit AFK. If a block is still
+       active, it's auto-silenced on wake so the panel doesn't start
+       strobing the moment you sit down.
+  AFK persists across state changes — Claude finishing a task while
   you're away won't light the panel up.
 - **Auto-AFK after ~30 s of bridge silence.** Catches "Pause subscription"
   tray clicks, host sleep, and USB unplug with the same calm visual.
