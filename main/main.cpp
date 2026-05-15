@@ -173,6 +173,12 @@ static constexpr int64_t AFK_AUTO_THRESHOLD_US = 30LL * 1'000'000LL;
 
 struct Viewport { int16_t x0, y0, w, h; };
 
+// Forward decl — defined later alongside the shadow framebuffer. Declared
+// up here so the font / glyph helpers (which appear earlier in the file)
+// can call through it.
+static inline void put_pixel(Hub75Driver &d, int x, int y,
+                             uint8_t r, uint8_t g, uint8_t b);
+
 static Viewport viewport_for(uint8_t panel_idx, SlotKind kind) {
   const int16_t pw  = static_cast<int16_t>(g_panel_width);
   const int16_t ph  = static_cast<int16_t>(g_panel_height);
@@ -796,7 +802,7 @@ static void draw_glyph(Hub75Driver &d, const Viewport &vp, int16_t x, int16_t y,
       const int16_t local_x = x + col;
       if (local_x < 0 || local_x >= vp.w) continue;
       if (bits & (1 << (FONT_W - 1 - col))) {
-        d.set_pixel(static_cast<uint16_t>(vp.x0 + local_x),
+        put_pixel(d,static_cast<uint16_t>(vp.x0 + local_x),
                     static_cast<uint16_t>(vp.y0 + local_y), r, g, b);
       }
     }
@@ -828,7 +834,7 @@ static void draw_glyph_scaled(Hub75Driver &d, const Viewport &vp,
         for (int dx = 0; dx < scale; dx++) {
           const int16_t local_x = x + col * scale + dx;
           if (local_x < 0 || local_x >= vp.w) continue;
-          d.set_pixel(static_cast<uint16_t>(vp.x0 + local_x),
+          put_pixel(d,static_cast<uint16_t>(vp.x0 + local_x),
                       static_cast<uint16_t>(vp.y0 + local_y), r, g, b);
         }
       }
@@ -847,6 +853,46 @@ static int text_width_px(const char *s) {
 // ======================================================================
 
 struct Rgb { uint8_t r, g, b; };
+
+// ============================================================================
+// Shadow framebuffer
+// ----------------------------------------------------------------------------
+// Hub75Driver::set_pixel writes the panel buffer but doesn't expose readback.
+// The AFK overlay needs to compose its glyphs with whatever the slot
+// renderers wrote underneath, so we keep a parallel CPU-side framebuffer
+// here. put_pixel() updates both the driver AND this shadow; the AFK
+// overlay reads from shadow to know what was already painted.
+//
+// Sized for the worst case (MAX_PANELS chained × 64×32 px × 3 bytes).
+// All slot/overlay/conn-dot rendering goes through put_pixel so shadow
+// stays consistent regardless of which render path painted last.
+// ============================================================================
+static constexpr int SHADOW_MAX_W = MAX_PANELS * 64;
+static constexpr int SHADOW_MAX_H = 32;
+static uint8_t g_shadow[SHADOW_MAX_W * SHADOW_MAX_H * 3];
+
+static inline void put_pixel(Hub75Driver &d, int x, int y,
+                             uint8_t r, uint8_t g, uint8_t b) {
+  const int stride = g_panel_count * g_panel_width;
+  if (x >= 0 && y >= 0 && x < stride && y < g_panel_height) {
+    const size_t idx = (static_cast<size_t>(y) * stride + x) * 3;
+    g_shadow[idx + 0] = r;
+    g_shadow[idx + 1] = g;
+    g_shadow[idx + 2] = b;
+  }
+  d.set_pixel(static_cast<uint16_t>(x), static_cast<uint16_t>(y), r, g, b);
+}
+
+static inline Rgb shadow_get(int x, int y) {
+  const int stride = g_panel_count * g_panel_width;
+  if (x < 0 || y < 0 || x >= stride || y >= g_panel_height) return {0, 0, 0};
+  const size_t idx = (static_cast<size_t>(y) * stride + x) * 3;
+  return {g_shadow[idx + 0], g_shadow[idx + 1], g_shadow[idx + 2]};
+}
+
+static inline void clear_shadow() {
+  memset(g_shadow, 0, sizeof(g_shadow));
+}
 
 static Rgb status_color_bright(Status s) {
   switch (s) {
@@ -935,12 +981,12 @@ static void render_border(Hub75Driver &d, const Viewport &vp, Status s, float t_
   }
 
   for (int x = 0; x < vp.w; x++) {
-    d.set_pixel(vp.x0 + x, vp.y0,             r, g, b);
-    d.set_pixel(vp.x0 + x, vp.y0 + vp.h - 1,  r, g, b);
+    put_pixel(d,vp.x0 + x, vp.y0,             r, g, b);
+    put_pixel(d,vp.x0 + x, vp.y0 + vp.h - 1,  r, g, b);
   }
   for (int y = 1; y < vp.h - 1; y++) {
-    d.set_pixel(vp.x0,             vp.y0 + y, r, g, b);
-    d.set_pixel(vp.x0 + vp.w - 1,  vp.y0 + y, r, g, b);
+    put_pixel(d,vp.x0,             vp.y0 + y, r, g, b);
+    put_pixel(d,vp.x0 + vp.w - 1,  vp.y0 + y, r, g, b);
   }
 
   if (s == Status::COMPACTING) {
@@ -955,8 +1001,8 @@ static void render_border(Hub75Driver &d, const Viewport &vp, Status s, float t_
       const uint8_t rr = static_cast<uint8_t>(bright.r * scale / 255);
       const uint8_t gg = static_cast<uint8_t>(bright.g * scale / 255);
       const uint8_t bb = static_cast<uint8_t>(bright.b * scale / 255);
-      d.set_pixel(vp.x0 + x, vp.y0,             rr, gg, bb);
-      d.set_pixel(vp.x0 + x, vp.y0 + vp.h - 1,  rr, gg, bb);
+      put_pixel(d,vp.x0 + x, vp.y0,             rr, gg, bb);
+      put_pixel(d,vp.x0 + x, vp.y0 + vp.h - 1,  rr, gg, bb);
     }
   }
 }
@@ -1012,7 +1058,7 @@ static void render_state_text(Hub75Driver &d, const Viewport &vp, Status s,
     const int spacing = (vp.w >= 48) ? 4 : 3;
     const int16_t cx = vp.w / 2;
     for (int i = -1; i <= 1; i++) {
-      d.set_pixel(vp.x0 + cx + i * spacing, vp.y0 + y + FONT_H - 1, c.r, c.g, c.b);
+      put_pixel(d,vp.x0 + cx + i * spacing, vp.y0 + y + FONT_H - 1, c.r, c.g, c.b);
     }
     return;
   }
@@ -1060,7 +1106,7 @@ static void render_task_bar(Hub75Driver &d, const Viewport &vp, Status s,
     const Rgb c = is_overflow ? overflow : (i < completed ? bright : dim);
     for (int dy = 0; dy < rect_h; dy++) {
       for (int dx = 0; dx < rect_w; dx++) {
-        d.set_pixel(vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
+        put_pixel(d,vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
       }
     }
   }
@@ -1092,7 +1138,7 @@ static void render_subagent_bar(Hub75Driver &d, const Viewport &vp, Status s, in
     const Rgb c = is_overflow ? overflow : base;
     for (int dy = 0; dy < rect_h; dy++) {
       for (int dx = 0; dx < rect_w; dx++) {
-        d.set_pixel(vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
+        put_pixel(d,vp.x0 + cx + dx, vp.y0 + y0 + dy, c.r, c.g, c.b);
       }
     }
   }
@@ -1108,7 +1154,7 @@ static void render_rx_flash(Hub75Driver &d, const Viewport &vp, Status s,
   if (since >= FLASH_US) return;
   const float i = 1.0f - static_cast<float>(since) / static_cast<float>(FLASH_US);
   const Rgb c = status_color_bright(s);
-  d.set_pixel(vp.x0 + vp.w - 3, vp.y0 + 1,
+  put_pixel(d,vp.x0 + vp.w - 3, vp.y0 + 1,
               static_cast<uint8_t>(c.r * i),
               static_cast<uint8_t>(c.g * i),
               static_cast<uint8_t>(c.b * i));
@@ -1119,7 +1165,7 @@ static void render_rx_flash(Hub75Driver &d, const Viewport &vp, Status s,
 static void render_unpinned_placeholder(Hub75Driver &d, const Viewport &vp) {
   const int16_t cx = vp.w / 2;
   const int16_t cy = vp.h / 2;
-  d.set_pixel(vp.x0 + cx, vp.y0 + cy, 12, 12, 18);
+  put_pixel(d,vp.x0 + cx, vp.y0 + cy, 12, 12, 18);
 }
 
 // Identify display — paint each owned panel's ID large and centered, in a
@@ -1178,8 +1224,65 @@ static void render_conn_dot(Hub75Driver &d, int64_t now_us) {
   const int16_t h = static_cast<int16_t>(d.get_height());
   const int64_t last = g_last_rx_us;
   const bool fresh = (last > 0) && (now_us - last < CONN_FRESH_THRESHOLD_US);
-  if (fresh) d.set_pixel(2, h - 2, 0, 80, 16);
-  else       d.set_pixel(2, h - 2, 80, 8, 0);
+  if (fresh) put_pixel(d,2, h - 2, 0, 80, 16);
+  else       put_pixel(d,2, h - 2, 80, 8, 0);
+}
+
+// ============================================================================
+// AFK overlay — large "AFK" rendered over the (dimmed) slot rendering when
+// manual AFK is engaged. Distinct from auto-AFK (rx-silence) and the
+// quiet-timeout screensaver, both of which auto-clear on activity. Manual
+// AFK requires another button press to exit, and the user needs a visible
+// "you parked this" cue.
+//
+// Each panel gets its own centered "AFK". Foreground color is composed
+// additively (clamped) with whatever the slot renderer wrote underneath
+// in the shadow buffer, so dimmed state text remains visible at glyph
+// intersections — both signals layered, neither hidden.
+// ============================================================================
+static constexpr Rgb AFK_FG = {0, 0, 51};  // pure blue at ~20% brightness
+
+static inline uint8_t add_clamp(uint8_t a, uint8_t b) {
+  const unsigned s = static_cast<unsigned>(a) + b;
+  return s > 255 ? 255 : static_cast<uint8_t>(s);
+}
+
+static void render_afk_overlay(Hub75Driver &d) {
+  constexpr int SCALE    = 3;
+  constexpr int GLYPH_H  = FONT_H * SCALE;          // 21
+  constexpr int STRIDE   = FONT_STRIDE * SCALE;     // 18
+  constexpr const char *TXT = "AFK";
+  constexpr int LEN      = 3;
+  const int text_w       = LEN * STRIDE - SCALE;    // 51
+  const int16_t panel_h  = static_cast<int16_t>(d.get_height());
+
+  for (uint8_t p = 0; p < g_panel_count; p++) {
+    const int16_t panel_x0 = static_cast<int16_t>(p * g_panel_width);
+    const int16_t x0       = panel_x0 + (g_panel_width - text_w) / 2;
+    const int16_t y0       = (panel_h - GLYPH_H) / 2;
+
+    for (int i = 0; i < LEN; i++) {
+      const uint8_t *bitmap = FONT_5X7[static_cast<uint8_t>(TXT[i])];
+      for (int row = 0; row < FONT_H; row++) {
+        const uint8_t bits = bitmap[row];
+        for (int col = 0; col < FONT_W; col++) {
+          if (!(bits & (1 << (FONT_W - 1 - col)))) continue;
+          // Scale up: each lit pixel becomes a SCALE×SCALE block.
+          for (int dy = 0; dy < SCALE; dy++) {
+            for (int dx = 0; dx < SCALE; dx++) {
+              const int x = x0 + i * STRIDE + col * SCALE + dx;
+              const int y = y0 + row * SCALE + dy;
+              const Rgb bg = shadow_get(x, y);
+              put_pixel(d, x, y,
+                        add_clamp(bg.r, AFK_FG.r),
+                        add_clamp(bg.g, AFK_FG.g),
+                        add_clamp(bg.b, AFK_FG.b));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // ======================================================================
@@ -1309,6 +1412,7 @@ extern "C" void app_main() {
     }
 
     g_driver->clear();
+    clear_shadow();
 
     const int64_t now = esp_timer_get_time();
 
@@ -1395,6 +1499,12 @@ extern "C" void app_main() {
         render_slot(*g_driver, viewport_for(p, SLOT_FULL), full, now, ack_active, screensaver);
       }
     }
+
+    // Manual-AFK overlay sits on top of slot rendering but under the
+    // conn dot. Only manual AFK gets the indicator: auto-AFK clears on
+    // rx, the quiet timeout clears on activity, neither needs the user
+    // to do anything to wake the panel. Manual AFK does.
+    if (g_afk_manual) render_afk_overlay(*g_driver);
 
     render_conn_dot(*g_driver, now);
 

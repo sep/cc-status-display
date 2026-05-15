@@ -49,8 +49,10 @@ front:
     2. **Already silenced, or nothing blocked?** The press toggles AFK
        instead. So "I see it, going to lunch" is two presses: silence,
        then AFK. The panel dims to ~10% with no animation, no strobing,
-       no RX pulses — even if a fresh `BLOCKED` arrives while you're
-       gone, your neighbors get nothing but a faint glow.
+       no RX pulses — and a large blue `AFK` is composed over the
+       middle of each panel as a "you parked this, press to wake"
+       reminder. Even if a fresh `BLOCKED` arrives while you're gone,
+       your neighbors get nothing but a faint glow.
     3. **Coming back?** Press once to exit AFK. If a block is still
        active, it's auto-silenced on wake so the panel doesn't start
        strobing the moment you sit down.
@@ -59,9 +61,12 @@ front:
 - **Auto-AFK after ~30 s of bridge silence.** Catches "Pause subscription"
   tray clicks, host sleep, and USB unplug with the same calm visual.
   Self-clears on the first byte from the bridge.
-- **Screensaver after 5 minutes of quiet.** Same dim look as AFK,
-  auto-engaged when every pinned slot has been `IDLE` or `BLOCKED` for the
-  full timeout. Wakes on any state change or button press.
+- **Screensaver after 5 minutes of quiet.** Same dim look as AFK but
+  *without* the blue `AFK` overlay — that's the visual triage cue. If
+  you see big blue letters, you have to press the button to wake; if
+  it's just dim, any new state update will wake it. Screensaver
+  auto-engages when every pinned slot has been `IDLE` or `BLOCKED` for
+  the full timeout.
 - **Bottom-left heartbeat pixel.** Green when bytes are flowing from the
   bridge (within the last 10 s); red when they aren't. Combined with
   auto-AFK you get a two-stage signal: red dot at 10 s ("nothing's

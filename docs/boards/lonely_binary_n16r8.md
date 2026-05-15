@@ -129,9 +129,10 @@ each press resolves the loudest thing on the panel.
 2. **Already silenced, or nothing blocked?** The press toggles AFK
    instead. So "I see it, going to lunch" is two presses while standing
    at the panel: silence, then AFK. The panel dims to ~10% with no
-   animation, no strobing, no RX pulses. Even a fresh `BLOCKED`
-   arriving while you're gone renders calm and dim — neighbors get
-   nothing but a faint glow.
+   animation, no strobing, no RX pulses, and a large blue `AFK` is
+   composed over the middle of each panel as a "you parked this, press
+   to wake" reminder. Even a fresh `BLOCKED` arriving while you're gone
+   renders calm and dim — neighbors get nothing but a faint glow.
 3. **Coming back?** Press once to exit AFK. If a block is still active,
    it's auto-silenced on wake so the panel doesn't start strobing the
    moment you sit down.
