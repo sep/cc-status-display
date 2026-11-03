@@ -137,6 +137,31 @@ its pings should get pongs on its own connection only.
 The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
 4 = tunnel link (blue up / purple down).
 
+## Host-side functional test of the SSH path (2026-11-03)
+
+Done on a Linux host with `tools/ssh-host-test/` (see its README), against
+OpenSSH 9.6 running unprivileged on localhost, with the fork built against
+**mbedTLS 4.2.0** and, as an A/B control, mbedTLS 3.6.7:
+
+- `fwtest` (mirror of `ssh_tunnel.cpp`): **pass**. ecdh-sha2-nistp256 kex,
+  ecdsa-sha2-nistp256 certificate host key, chacha20-poly1305, hmac-sha2-256;
+  ECDSA P-256 `-m PEM` key auth from memory; remote forward bound on 7777;
+  two concurrent clients, 5 lines, 3 pongs, each reply on the originating
+  channel; clean session teardown. Exit 0.
+- libssh2 harness, 60 tests: **56 pass**, 8 of them self-skipped on
+  algorithms this backend doesn't offer (3des, md5/sha1 MACs, ed25519/ssh-rsa
+  cert host keys). 4 fail **identically on mbedTLS 3.6.7**, so they are the
+  test environment: password + keyboard-interactive (docker image's
+  password), agent forwarding, and an RSA cert whose only principal is the
+  docker image's `libssh2` user (`sshd: Certificate invalid: name is not a
+  listed principal`). RSA SHA2-512 signing itself passed in the plain-key
+  tests.
+
+Not covered by this, and still owed to hardware: ESP-IDF's mbedTLS
+configuration (algorithm availability may differ from a desktop build),
+memory with the HUB75 driver running, Wi-Fi, and keepalive behaviour over
+hours.
+
 ## Success criteria
 
 - [x] Builds for both boards on ESP-IDF v6.0 with the fork's mbedTLS 4 backend
@@ -144,7 +169,7 @@ The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
       with the tunnel linked in vs 0x66cd0 (≈421 KB) without; 71 % of the 3 MB
       app partition free. (On v5.5 / mbedTLS 3.6 it had been ≈920 KB vs ≈446 KB.)
 - [ ] Session comes up, listener binds, survives 10+ minutes idle (keepalive).
-- [ ] Two concurrent connections, pongs don't cross-talk.
+- [ ] Two concurrent connections, pongs don't cross-talk. *(Proven on host with `fwtest`; re-confirm on the board.)*
 - [ ] Session recovers after `sudo systemctl restart ssh` on the VM and after a Wi-Fi drop.
 - [ ] Free heap after connect is comfortable (`esp_get_free_heap_size()` ≳ 100 KB with HUB75 running).
 - [ ] USB serial path still works unchanged.
