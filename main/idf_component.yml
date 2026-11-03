@@ -3,5 +3,5 @@ dependencies:
     version: '>=5.0'
   esphome/esp-hub75: ^0.3.6
   espressif/cjson: ^1.7.19
-  # SSH tunnel spike — unmodified libssh2 1.11.1 on ESP-IDF's bundled mbedTLS.
-  skuodi/libssh2_esp: ^1.1.0
+  # (libssh2 is a local component — components/libssh2 — not a registry
+  #  package; see the comment in its CMakeLists.txt for why.)

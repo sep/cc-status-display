@@ -29,7 +29,6 @@
 #include <mbedtls/base64.h>
 #include <sys/select.h>
 
-#include <libssh2_config.h>
 #include <libssh2.h>
 
 #include <cerrno>

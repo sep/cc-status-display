@@ -28,7 +28,7 @@ account somewhere both things can reach".
 |---|---|
 | `main/ssh_tunnel.{h,cpp}` | Wi-Fi station + one FreeRTOS task running libssh2: connect, host-key log/pin, publickey auth, keepalive, `forward_listen`, non-blocking accept/read loop. Lines go to the same `handle_line()` the serial reader uses. |
 | `main/main.cpp` | `handle_line()` and every reply path now carry an `SshClient *to`; `write_json_line(to, …)` writes to that channel, or USB when `to` is null. One extra status pixel for the tunnel link. |
-| `main/idf_component.yml` | `skuodi/libssh2_esp ^1.1.0` — unmodified libssh2 1.11.1 on ESP-IDF's mbedTLS, BSD-3. |
+| `components/libssh2/` | libssh2 vendored as a git submodule pinned at upstream master (2026-11-02), built on ESP-IDF's mbedTLS, BSD-3. **Not** the registry package: ESP-IDF v6.0 ships mbedTLS 4.0 / TF-PSA-Crypto, whose removal of the legacy `mbedtls/*.h` headers breaks libssh2 1.11.1; only unreleased master has mbedTLS 4 support. First CI run on this branch found that. |
 | `main/CMakeLists.txt` | Embeds `main/keys/id_ecdsa{,.pub}` at build time (empty placeholders if absent so CI builds). |
 | `main/Kconfig.projbuild` | `ClaudePanel SSH tunnel (spike)` menu: enable flag, Wi-Fi, host/port/user, listen port, host-key pin, stack size. |
 | `partitions.csv`, `sdkconfig.defaults` | 3 MB factory app (was 1 MB default). App offset unchanged, flasher manifest unaffected. |
@@ -135,3 +135,4 @@ The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
 - Cross-bridge slot collisions aren't flagged. The firmware now knows which channel each line came from, so it *can* — later.
 - Spontaneous (non-reply) device→host messages would need broadcasting to every channel; nothing emits them today.
 - Stack size (48 KB) copied from upstream's example floor; tune down once real high-water marks are known.
+- libssh2 is an unreleased master snapshot. Watch <https://github.com/libssh2/libssh2/releases> and move the submodule to the first release ≥ 1.12 that carries mbedTLS 4 support; add it to MAINTENANCE.md if this graduates from spike.

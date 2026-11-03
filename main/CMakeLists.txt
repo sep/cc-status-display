@@ -18,7 +18,7 @@ idf_component_register(
     SRCS "main.cpp" "ssh_tunnel.cpp"
     INCLUDE_DIRS "."
     PRIV_REQUIRES esp_app_format esp_driver_gpio esp_driver_usb_serial_jtag esp_timer nvs_flash
-                  esp_wifi esp_netif esp_event lwip mbedtls
+                  esp_wifi esp_netif esp_event lwip mbedtls libssh2
     EMBED_TXTFILES ${_cc_embed_files}
 )
 
