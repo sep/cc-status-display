@@ -66,7 +66,7 @@ static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *
   }
 }
 
-static void wifi_start() {
+[[maybe_unused]] static void wifi_start() {
   s_wifi_eg = xEventGroupCreate();
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -97,12 +97,12 @@ static void wifi_start() {
 // ----------------------------------------------------------------------------
 
 static constexpr int    MAX_CLIENTS = 4;
-static constexpr size_t LINE_MAX    = 512;  // mirrors serial_reader_task
+static constexpr size_t SSH_LINE_MAX = 512;  // mirrors serial_reader_task
 
 struct SshClient {
   LIBSSH2_CHANNEL *ch  = nullptr;
   size_t           len = 0;
-  char             line[LINE_MAX];
+  char             line[SSH_LINE_MAX];
 };
 
 static SshClient         s_clients[MAX_CLIENTS];
@@ -202,7 +202,7 @@ static void close_client(SshClient &c, const char *why) {
   libssh2_session_set_blocking(s_session, 0);
   c.ch  = nullptr;
   c.len = 0;
-  s_nclients--;
+  s_nclients = s_nclients - 1;
 }
 
 static void teardown() {
@@ -308,7 +308,7 @@ static void feed_bytes(SshClient &c, const char *buf, ssize_t n) {
       c.line[c.len] = '\0';
       if (s_handler) s_handler(c.line, c.len, &c);
       c.len = 0;
-    } else if (c.len < LINE_MAX - 1) {
+    } else if (c.len < SSH_LINE_MAX - 1) {
       c.line[c.len++] = ch;
     } else {
       c.len = 0;  // over-long line; resync on next '\n'
@@ -332,7 +332,7 @@ static bool service_once() {
     } else {
       slot->ch  = ch;
       slot->len = 0;
-      s_nclients++;
+      s_nclients = s_nclients + 1;
       ESP_LOGI(TAG, "client %d connected (%d active)",
                static_cast<int>(slot - s_clients), static_cast<int>(s_nclients));
     }
@@ -388,7 +388,7 @@ static bool service_once() {
   return true;
 }
 
-static void ssh_task(void *) {
+[[maybe_unused]] static void ssh_task(void *) {
   libssh2_init(0);
   for (;;) {
     xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
