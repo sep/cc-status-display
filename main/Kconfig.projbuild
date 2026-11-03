@@ -1,0 +1,66 @@
+menu "ClaudePanel SSH tunnel (spike)"
+
+    config CC_SSH_ENABLE
+        bool "Bring up Wi-Fi and hold an SSH remote-forward tunnel"
+        default n
+        help
+            When enabled, the firmware joins the configured Wi-Fi network,
+            opens an SSH session to CC_SSH_HOST and requests a remote port
+            forward on the server's loopback (CC_SSH_LISTEN_PORT). Every
+            bridge that connects to that port on the server arrives here as
+            its own SSH channel and is treated exactly like the USB serial
+            stream. USB serial keeps working regardless.
+
+    config CC_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+
+    config CC_WIFI_PASSWORD
+        string "Wi-Fi password (empty = open network)"
+        default ""
+
+    config CC_SSH_HOST
+        string "SSH server host"
+        default ""
+
+    config CC_SSH_PORT
+        int "SSH server port"
+        default 22
+
+    config CC_SSH_USER
+        string "SSH username"
+        default "claudepanel"
+
+    config CC_SSH_LISTEN_PORT
+        int "Remote loopback port to listen on"
+        default 7777
+        help
+            Port the SSH server binds on its own loopback for us. Bridges
+            reach it with `ssh -L <local>:localhost:<this port> user@host`.
+            Must match the permitlisten= restriction in authorized_keys.
+
+    config CC_SSH_HOSTKEY_SHA256
+        string "Expected server host key fingerprint"
+        default ""
+        help
+            "SHA256:..." as printed by `ssh-keygen -lf`. Empty = accept any
+            host key and log its fingerprint (spike behaviour; pin it once
+            you've read it off the boot log).
+
+    config CC_SSH_TASK_STACK
+        int "SSH task stack size (bytes)"
+        range 16384 131072
+        default 49152
+        help
+            libssh2 + mbedTLS key exchange is stack-hungry; the upstream
+            libssh2_esp example floors this at 50000.
+
+    config CC_SSH_RECONNECT_MS
+        int "Reconnect delay after a failed or dropped session (ms)"
+        default 5000
+
+    config CC_SSH_TRACE
+        bool "Enable libssh2 trace logging"
+        default n
+
+endmenu

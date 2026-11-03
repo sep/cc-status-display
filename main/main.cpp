@@ -4,6 +4,8 @@
 // Architecture overview:
 //
 //   serial_reader_task  ──reads NDJSON──▶  handle_line()
+//   ssh_tunnel task     ──reads NDJSON──▶  handle_line()   (one SSH channel per bridge;
+//                                                            replies routed back per channel)
 //                                              │
 //                                              ├─ apply_state_update()    (mutates g_clients[slot])
 //                                              ├─ handle_ping()           (writes pong reply)
@@ -27,6 +29,8 @@
 #include "hub75.h"
 
 #include "board_config.h"
+#include "ssh_tunnel.h"
+#include "sdkconfig.h"
 #include "cJSON.h"
 #include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
@@ -227,16 +231,21 @@ static void format_client_id(uint8_t panel_idx, SlotKind kind, char *out, size_t
 }
 
 // ======================================================================
-// Outgoing messages — write JSON replies back over USB-Serial-JTAG.
+// Outgoing messages — write JSON replies back to the ingress a request
+// arrived on: USB-Serial-JTAG when `to` is null, else that SSH channel.
 // We hand-roll the JSON to avoid cJSON allocation churn in the hot path.
 // ======================================================================
 
-static void write_json_line(const char *buf, int n) {
+static void write_json_line(SshClient *to, const char *buf, int n) {
   if (n <= 0) return;
+  if (to) {
+    ssh_tunnel_write(to, buf, static_cast<size_t>(n));
+    return;
+  }
   usb_serial_jtag_write_bytes(buf, static_cast<size_t>(n), pdMS_TO_TICKS(20));
 }
 
-static void send_pong(int64_t seq) {
+static void send_pong(int64_t seq, SshClient *to) {
   // Snapshot the entire client table under the mutex first, then serialize
   // without holding the lock (JSON writes can take longer than the 10 ms
   // mutex budget, and the wire format doesn't need a consistent "now").
@@ -282,11 +291,11 @@ static void send_pong(int64_t seq) {
   }
   n += snprintf(buf + n, sizeof(buf) - n,
       "},\"uptime_ms\":%lld}\n", static_cast<long long>(uptime_ms));
-  write_json_line(buf, n);
+  write_json_line(to, buf, n);
 }
 
 static void send_spontaneous_state_for(uint8_t panel_idx, SlotKind kind,
-                                       const ClientSnapshot &cs) {
+                                       const ClientSnapshot &cs, SshClient *to) {
   char id[8];
   format_client_id(panel_idx, kind, id, sizeof(id));
   char buf[256];
@@ -297,7 +306,7 @@ static void send_spontaneous_state_for(uint8_t panel_idx, SlotKind kind,
       id, status_name(cs.state),
       cs.subagent_count, cs.tasks_active, cs.tasks_completed,
       static_cast<long long>(esp_timer_get_time() / 1000));
-  write_json_line(buf, n);
+  write_json_line(to, buf, n);
 }
 
 // ======================================================================
@@ -423,7 +432,7 @@ static bool validate_configure(const cJSON *root, PendingConfig *out) {
   return true;
 }
 
-static void send_configured_ack(bool changed) {
+static void send_configured_ack(bool changed, SshClient *to) {
   char buf[256];
   const int n = snprintf(buf, sizeof(buf),
       "{\"type\":\"configured\",\"panel_count\":%d,\"panel_width\":%u,\"panel_height\":%u,"
@@ -431,10 +440,10 @@ static void send_configured_ack(bool changed) {
       g_panel_count, g_panel_width, g_panel_height, g_first_id,
       changed ? "true" : "false",
       static_cast<long long>(esp_timer_get_time() / 1000));
-  write_json_line(buf, n);
+  write_json_line(to, buf, n);
 }
 
-static void handle_configure(const cJSON *root) {
+static void handle_configure(const cJSON *root, SshClient *to) {
   PendingConfig pending;
   if (!validate_configure(root, &pending)) return;  // silently dropped
 
@@ -443,7 +452,7 @@ static void handle_configure(const cJSON *root) {
       pending.first_id     == g_first_id &&
       pending.panel_width  == g_panel_width &&
       pending.panel_height == g_panel_height) {
-    send_configured_ack(false);
+    send_configured_ack(false, to);
     return;
   }
 
@@ -489,7 +498,7 @@ static void handle_configure(const cJSON *root) {
 
   ESP_LOGI(TAG, "configure applied: panels=%d first_id=%d %ux%u",
            g_panel_count, g_first_id, g_panel_width, g_panel_height);
-  send_configured_ack(true);
+  send_configured_ack(true, to);
 }
 
 // ======================================================================
@@ -579,13 +588,13 @@ static void apply_state_update(const cJSON *root) {
   }
 }
 
-static void handle_ping(const cJSON *root) {
+static void handle_ping(const cJSON *root, SshClient *to) {
   const cJSON *seq_node = cJSON_GetObjectItemCaseSensitive(root, "seq");
   int64_t seq = 0;
   if (cJSON_IsNumber(seq_node)) {
     seq = static_cast<int64_t>(cJSON_GetNumberValue(seq_node));
   }
-  send_pong(seq);
+  send_pong(seq, to);
 }
 
 static void handle_identify(const cJSON *root) {
@@ -607,7 +616,7 @@ static void handle_identify(const cJSON *root) {
   ESP_LOGI(TAG, "identify: %lld ms", static_cast<long long>(duration_ms));
 }
 
-static void handle_resync() {
+static void handle_resync(SshClient *to) {
   ClientSnapshot local[TOTAL_SLOTS];
   if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
     memcpy(local, g_clients, sizeof(local));
@@ -618,12 +627,12 @@ static void handle_resync() {
   for (uint8_t p = 0; p < g_panel_count; p++) {
     for (uint8_t k = 0; k < SLOT_KIND_COUNT; k++) {
       const ClientSnapshot &cs = local[slot_index(p, static_cast<SlotKind>(k))];
-      if (cs.pinned) send_spontaneous_state_for(p, static_cast<SlotKind>(k), cs);
+      if (cs.pinned) send_spontaneous_state_for(p, static_cast<SlotKind>(k), cs, to);
     }
   }
 }
 
-static void handle_line(const char *line, size_t len) {
+static void handle_line(const char *line, size_t len, SshClient *to) {
   if (len == 0) return;
 
   cJSON *root = cJSON_Parse(line);
@@ -637,11 +646,11 @@ static void handle_line(const char *line, size_t len) {
   } else if (strcmp(type_str, "state") == 0) {
     apply_state_update(root);
   } else if (strcmp(type_str, "ping") == 0) {
-    handle_ping(root);
+    handle_ping(root, to);
   } else if (strcmp(type_str, "resync") == 0) {
-    handle_resync();
+    handle_resync(to);
   } else if (strcmp(type_str, "configure") == 0) {
-    handle_configure(root);
+    handle_configure(root, to);
   } else if (strcmp(type_str, "identify") == 0) {
     handle_identify(root);
   }
@@ -674,7 +683,7 @@ static void serial_reader_task(void *) {
       if (c == '\r') continue;
       if (c == '\n') {
         line[len] = '\0';
-        handle_line(line, len);
+        handle_line(line, len, nullptr);
         len = 0;
       } else if (len < LINE_BUF_MAX - 1) {
         line[len++] = c;
@@ -683,6 +692,13 @@ static void serial_reader_task(void *) {
       }
     }
   }
+}
+
+// SSH tunnel ingress — same dispatcher as serial, with replies routed to
+// the originating channel. Runs on the tunnel task (see ssh_tunnel.h).
+static void ssh_line_handler(const char *line, size_t len, SshClient *reply_to) {
+  g_last_rx_us = esp_timer_get_time();
+  handle_line(line, len, reply_to);
 }
 
 // ======================================================================
@@ -1226,6 +1242,12 @@ static void render_conn_dot(Hub75Driver &d, int64_t now_us) {
   const bool fresh = (last > 0) && (now_us - last < CONN_FRESH_THRESHOLD_US);
   if (fresh) put_pixel(d,2, h - 2, 0, 80, 16);
   else       put_pixel(d,2, h - 2, 80, 8, 0);
+#ifdef CONFIG_CC_SSH_ENABLE
+  // SSH tunnel link, one pixel right of the heartbeat dot: blue while the
+  // session + remote listener are up, dim purple while (re)connecting.
+  if (ssh_tunnel_is_connected()) put_pixel(d, 4, h - 2, 0, 16, 80);
+  else                           put_pixel(d, 4, h - 2, 40, 0, 40);
+#endif
 }
 
 // ============================================================================
@@ -1393,6 +1415,10 @@ extern "C" void app_main() {
   // the v1.2 full-table pong format.
   xTaskCreate(serial_reader_task, "serial_rx", 6144, nullptr, 5, nullptr);
   xTaskCreate(ack_button_task,    "ack_btn",   3072, nullptr, 4, nullptr);
+
+  // Second ingress: SSH remote-forward tunnel (spike). No-op unless
+  // CONFIG_CC_SSH_ENABLE; see SPIKE-SSH.md.
+  ssh_tunnel_start(ssh_line_handler);
 
   ESP_ERROR_CHECK(esp_task_wdt_add(nullptr));
 
