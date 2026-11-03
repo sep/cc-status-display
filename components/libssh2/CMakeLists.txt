@@ -3,11 +3,12 @@
 # Why vendored instead of the registry package (skuodi/libssh2_esp):
 # ESP-IDF v6.0 ships mbedTLS 4.0 (TF-PSA-Crypto), which removed the legacy
 # <mbedtls/rsa.h>, <mbedtls/ecdsa.h>, <mbedtls/ctr_drbg.h> … headers that
-# libssh2 1.11.1's backend includes unconditionally, so that package cannot
-# compile on v6.0. Upstream libssh2 master gained mbedTLS 4 support
-# (version-guarded includes + PSA calls) but has not cut a release since
-# 1.11.1 (Oct 2024), so we pin a master commit as a git submodule. To bump:
-# `git -C components/libssh2/libssh2 checkout <sha>` and commit the pointer.
+# libssh2 1.11.1's backend includes unconditionally, and upstream master's
+# mbedTLS 4 path is unfinished. The submodule therefore points at
+# mike-rogers/libssh2 branch `mbedtls-4-psa` (upstream master + a PSA-based
+# mbedTLS 4 backend). Move it back to upstream once that work is merged and
+# released. To bump: `git -C components/libssh2/libssh2 checkout <sha>` and
+# commit the pointer.
 set(_ssh2 "${CMAKE_CURRENT_SOURCE_DIR}/libssh2")
 
 # src/Makefile.inc CSOURCES minus the openssl / libgcrypt / wincng / os400

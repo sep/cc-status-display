@@ -28,47 +28,29 @@ account somewhere both things can reach".
 |---|---|
 | `main/ssh_tunnel.{h,cpp}` | Wi-Fi station + one FreeRTOS task running libssh2: connect, host-key log/pin, publickey auth, keepalive, `forward_listen`, non-blocking accept/read loop. Lines go to the same `handle_line()` the serial reader uses. |
 | `main/main.cpp` | `handle_line()` and every reply path now carry an `SshClient *to`; `write_json_line(to, …)` writes to that channel, or USB when `to` is null. One extra status pixel for the tunnel link. |
-| `components/libssh2/` | libssh2 vendored as a git submodule pinned at upstream master (2026-11-02), built on ESP-IDF's mbedTLS, BSD-3. **Not** the registry package: ESP-IDF v6.0 ships mbedTLS 4.0 / TF-PSA-Crypto, whose removal of the legacy `mbedtls/*.h` headers breaks libssh2 1.11.1; only unreleased master has mbedTLS 4 support. First CI run on this branch found that. |
+| `components/libssh2/` | libssh2 vendored as a git submodule (fork branch `mbedtls-4-psa`, see below), built on ESP-IDF's mbedTLS 4, BSD-3. Not the registry package. |
 | `main/CMakeLists.txt` | Embeds `main/keys/id_ecdsa{,.pub}` at build time (empty placeholders if absent so CI builds). |
 | `main/Kconfig.projbuild` | `ClaudePanel SSH tunnel (spike)` menu: enable flag, Wi-Fi, host/port/user, listen port, host-key pin, stack size. |
 | `partitions.csv`, `sdkconfig.defaults` | 3 MB factory app (was 1 MB default). App offset unchanged, flasher manifest unaffected. |
 
-## ESP-IDF version — read this first
+## ESP-IDF version and libssh2 provenance
 
-**This branch's CI builds with ESP-IDF v5.5, not the v6.0 the repo pins.**
-Spike expedient, not a project decision:
+The branch builds on **ESP-IDF v6.0** (the repo's pin) with libssh2 from
+<https://github.com/mike-rogers/libssh2> branch `mbedtls-4-psa`: upstream
+master plus a PSA-based backend for mbedTLS 4 / TF-PSA-Crypto. History of
+how we got here, each step confirmed by a CI run on this branch:
 
-- ESP-IDF v6.0 ships mbedTLS 4.0 (TF-PSA-Crypto). libssh2 1.11.1 (the
-  registry package) includes legacy headers that no longer exist, so it
-  cannot compile. CI run 1 on this branch found that.
-- libssh2 master has *partial* mbedTLS 4 support: version-guarded includes
-  and PSA hashing, but a dozen call sites still pass the compiled-out CTR-DRBG
-  context and `mbedtls_pk_parse_key` is called with the mbedTLS 3 signature.
-  Upstream CI only tests mbedTLS 3.1 and 3.6, so that path has never been
-  built by anyone. CI run 2 found that.
-- ESP-IDF v5.5 (supported into 2028) ships mbedTLS 3.6, exactly what
-  libssh2 is tested against upstream. Building the spike there isolates
-  the question the spike exists to answer — does SSH-on-ESP32 work on this
-  hardware — from an unproven crypto-backend port.
-
-If hardware says yes, pick one before productising:
-
-1. **Ship on v5.5** until libssh2 releases mbedTLS 4 support (watch
-   <https://github.com/libssh2/libssh2/issues/2284>). Cheapest; reverses the
-   v6 migration for this firmware.
-2. **Port libssh2's mbedTLS backend to mbedTLS 4 and upstream it.** Scope
-   sized on 2026-11-03: add `mbedtls/private/*.h` includes for ≥ 4.0 (and the
-   `tf-psa-crypto/drivers/builtin/include` dir, which ESP-IDF doesn't export),
-   an `f_rng` shim over `psa_generate_random()`, drop the two RNG args from
-   five `mbedtls_pk_parse_key*` calls, and rewrite RSA/EC key import: the
-   `mbedtls_pk_rsa()` / `mbedtls_pk_ec()` accessors libssh2 uses to pull a
-   raw key out of a parsed `mbedtls_pk_context` **no longer exist** in
-   mbedTLS 4's `pk.h` (checked against ESP-IDF v6.0's fork), so that path
-   has to go through PSA key import or `mbedtls_pk_*` export calls. More
-   than a day with CI as the compiler, plus review risk on code nobody else
-   runs. Upstream tracking: <https://github.com/libssh2/libssh2/issues/2284>.
-3. **Drop SSH on the device** and revisit the transport (TLS relay on the VM,
-   or a laptop as hub). Last resort; loses the "just an SSH account" pitch.
+- libssh2 1.11.1 (the registry package) includes legacy mbedTLS headers
+  that mbedTLS 4 removed → cannot compile on v6.0.
+- Upstream libssh2 master's mbedTLS 4 path is unfinished and untested
+  upstream (CI covers 3.1/3.6 only): compiled-out RNG context still passed
+  at ~12 call sites, mbedTLS 3 `mbedtls_pk_parse_key` signature, and the
+  `mbedtls_pk_rsa()` / `mbedtls_pk_ec()` accessors it uses no longer exist.
+- Interim, the branch built on v5.5 (mbedTLS 3.6) to prove everything else.
+- The fork branch replaces that with a real mbedTLS 4 backend; CI here is
+  the first ESP-IDF build of it. Upstream tracking:
+  <https://github.com/libssh2/libssh2/issues/2284> — once merged and
+  released, move the submodule back to upstream and add it to MAINTENANCE.md.
 
 ## Key-type note
 
@@ -157,9 +139,9 @@ The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
 
 ## Success criteria
 
-- [x] Builds for both boards (CI on this branch, ESP-IDF **v5.5** — see above).
-      Image: 0xe5d90 (≈920 KB) with the tunnel linked in, 0x6ce20 (≈446 KB)
-      without; 70 % of the 3 MB app partition free. CI run 5, 2026-11-03.
+- [ ] Builds for both boards on ESP-IDF v6.0 with the fork's mbedTLS 4 backend (CI on this branch).
+      For reference, on v5.5 / mbedTLS 3.6 the image was 0xe5d90 (≈920 KB)
+      with the tunnel linked in vs 0x6ce20 (≈446 KB) without.
 - [ ] Session comes up, listener binds, survives 10+ minutes idle (keepalive).
 - [ ] Two concurrent connections, pongs don't cross-talk.
 - [ ] Session recovers after `sudo systemctl restart ssh` on the VM and after a Wi-Fi drop.
@@ -174,4 +156,4 @@ The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
 - Cross-bridge slot collisions aren't flagged. The firmware now knows which channel each line came from, so it *can* — later.
 - Spontaneous (non-reply) device→host messages would need broadcasting to every channel; nothing emits them today.
 - Stack size (48 KB) copied from upstream's example floor; tune down once real high-water marks are known.
-- libssh2 is an unreleased master snapshot. Watch <https://github.com/libssh2/libssh2/releases> and move the submodule to the first release ≥ 1.12 that carries mbedTLS 4 support; add it to MAINTENANCE.md if this graduates from spike.
+- libssh2 comes from a personal fork branch until the mbedTLS 4 backend is upstreamed and released; see "ESP-IDF version and libssh2 provenance".

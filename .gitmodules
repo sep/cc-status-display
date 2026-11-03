@@ -1,3 +1,3 @@
 [submodule "components/libssh2/libssh2"]
 	path = components/libssh2/libssh2
-	url = https://github.com/libssh2/libssh2.git
+	url = https://github.com/mike-rogers/libssh2.git
