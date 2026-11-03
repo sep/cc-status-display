@@ -37,6 +37,11 @@ jobs:
             macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
           - id: lonely_binary_n16r8
             macro: BOARD_LONELY_BINARY_N16R8_GOLD
+          # SPIKE ONLY: same board with the SSH tunnel compiled in, so the
+          # link is exercised and the image size is real. Not released.
+          - id: thing_plus_ssh
+            macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+            extra: -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci-ssh"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -47,7 +52,7 @@ jobs:
           esp_idf_version: v5.5   # SPIKE ONLY — see SPIKE-SSH.md "ESP-IDF version"
           target: esp32s3
           path: '.'
-          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}
+          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }} ${{ matrix.board.extra }}
 
       - name: Stage binaries
         run: |
