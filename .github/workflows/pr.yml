@@ -44,7 +44,7 @@ jobs:
 
       - uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
-          esp_idf_version: v6.0
+          esp_idf_version: v5.5   # SPIKE ONLY — see SPIKE-SSH.md "ESP-IDF version"
           target: esp32s3
           path: '.'
           command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}

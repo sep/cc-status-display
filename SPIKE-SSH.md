@@ -33,6 +33,39 @@ account somewhere both things can reach".
 | `main/Kconfig.projbuild` | `ClaudePanel SSH tunnel (spike)` menu: enable flag, Wi-Fi, host/port/user, listen port, host-key pin, stack size. |
 | `partitions.csv`, `sdkconfig.defaults` | 3 MB factory app (was 1 MB default). App offset unchanged, flasher manifest unaffected. |
 
+## ESP-IDF version — read this first
+
+**This branch's CI builds with ESP-IDF v5.5, not the v6.0 the repo pins.**
+Spike expedient, not a project decision:
+
+- ESP-IDF v6.0 ships mbedTLS 4.0 (TF-PSA-Crypto). libssh2 1.11.1 (the
+  registry package) includes legacy headers that no longer exist, so it
+  cannot compile. CI run 1 on this branch found that.
+- libssh2 master has *partial* mbedTLS 4 support: version-guarded includes
+  and PSA hashing, but a dozen call sites still pass the compiled-out CTR-DRBG
+  context and `mbedtls_pk_parse_key` is called with the mbedTLS 3 signature.
+  Upstream CI only tests mbedTLS 3.1 and 3.6, so that path has never been
+  built by anyone. CI run 2 found that.
+- ESP-IDF v5.5 (supported into 2028) ships mbedTLS 3.6, exactly what
+  libssh2 is tested against upstream. Building the spike there isolates
+  the question the spike exists to answer — does SSH-on-ESP32 work on this
+  hardware — from an unproven crypto-backend port.
+
+If hardware says yes, pick one before productising:
+
+1. **Ship on v5.5** until libssh2 releases mbedTLS 4 support (watch
+   <https://github.com/libssh2/libssh2/issues/2284>). Cheapest; reverses the
+   v6 migration for this firmware.
+2. **Port libssh2's mbedTLS backend to mbedTLS 4 and upstream it.** Scope
+   sized on 2026-11-03: add `mbedtls/private/*.h` includes for ≥ 4.0 (and the
+   `tf-psa-crypto/drivers/builtin/include` dir, which ESP-IDF doesn't export),
+   an `f_rng` shim over `psa_generate_random()`, drop the two RNG args from
+   five `mbedtls_pk_parse_key*` calls, and replace the `mbedtls_pk_rsa()` /
+   `mbedtls_pk_ec()` accessors if they're gone from pk.h. Roughly a day with
+   CI as the compiler, plus review risk on code nobody else runs.
+3. **Drop SSH on the device** and revisit the transport (TLS relay on the VM,
+   or a laptop as hub). Last resort; loses the "just an SSH account" pitch.
+
 ## Key-type note
 
 libssh2's mbedTLS backend does **RSA and ECDSA, not ed25519** — for both
