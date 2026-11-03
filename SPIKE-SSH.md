@@ -139,9 +139,10 @@ The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
 
 ## Success criteria
 
-- [ ] Builds for both boards on ESP-IDF v6.0 with the fork's mbedTLS 4 backend (CI on this branch).
-      For reference, on v5.5 / mbedTLS 3.6 the image was 0xe5d90 (≈920 KB)
-      with the tunnel linked in vs 0x6ce20 (≈446 KB) without.
+- [x] Builds for both boards on ESP-IDF v6.0 with the fork's mbedTLS 4 backend
+      (CI run 6, 2026-11-03; zero warnings from libssh2). Image 0xddab0 (≈887 KB)
+      with the tunnel linked in vs 0x66cd0 (≈421 KB) without; 71 % of the 3 MB
+      app partition free. (On v5.5 / mbedTLS 3.6 it had been ≈920 KB vs ≈446 KB.)
 - [ ] Session comes up, listener binds, survives 10+ minutes idle (keepalive).
 - [ ] Two concurrent connections, pongs don't cross-talk.
 - [ ] Session recovers after `sudo systemctl restart ssh` on the VM and after a Wi-Fi drop.
