@@ -157,7 +157,9 @@ The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
 
 ## Success criteria
 
-- [ ] Builds under ESP-IDF v6.0 for both boards (CI on this branch).
+- [x] Builds for both boards (CI on this branch, ESP-IDF **v5.5** — see above).
+      Image: 0xe5d90 (≈920 KB) with the tunnel linked in, 0x6ce20 (≈446 KB)
+      without; 70 % of the 3 MB app partition free. CI run 5, 2026-11-03.
 - [ ] Session comes up, listener binds, survives 10+ minutes idle (keepalive).
 - [ ] Two concurrent connections, pongs don't cross-talk.
 - [ ] Session recovers after `sudo systemctl restart ssh` on the VM and after a Wi-Fi drop.
