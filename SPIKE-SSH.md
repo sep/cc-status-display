@@ -60,9 +60,13 @@ If hardware says yes, pick one before productising:
    sized on 2026-11-03: add `mbedtls/private/*.h` includes for ≥ 4.0 (and the
    `tf-psa-crypto/drivers/builtin/include` dir, which ESP-IDF doesn't export),
    an `f_rng` shim over `psa_generate_random()`, drop the two RNG args from
-   five `mbedtls_pk_parse_key*` calls, and replace the `mbedtls_pk_rsa()` /
-   `mbedtls_pk_ec()` accessors if they're gone from pk.h. Roughly a day with
-   CI as the compiler, plus review risk on code nobody else runs.
+   five `mbedtls_pk_parse_key*` calls, and rewrite RSA/EC key import: the
+   `mbedtls_pk_rsa()` / `mbedtls_pk_ec()` accessors libssh2 uses to pull a
+   raw key out of a parsed `mbedtls_pk_context` **no longer exist** in
+   mbedTLS 4's `pk.h` (checked against ESP-IDF v6.0's fork), so that path
+   has to go through PSA key import or `mbedtls_pk_*` export calls. More
+   than a day with CI as the compiler, plus review risk on code nobody else
+   runs. Upstream tracking: <https://github.com/libssh2/libssh2/issues/2284>.
 3. **Drop SSH on the device** and revisit the transport (TLS relay on the VM,
    or a laptop as hub). Last resort; loses the "just an SSH account" pitch.
 
