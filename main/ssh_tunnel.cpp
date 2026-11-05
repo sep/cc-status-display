@@ -55,7 +55,7 @@ static void log_heap(const char *where) {
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
-static LIBSSH2_ALLOC_FUNC(ssh2_alloc) {
+static void *ssh2_alloc(size_t count, void **abstract) {
   (void)abstract;
   void *p = heap_caps_malloc_prefer(count, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
   if (!p) {
@@ -65,7 +65,7 @@ static LIBSSH2_ALLOC_FUNC(ssh2_alloc) {
   return p;
 }
 
-static LIBSSH2_REALLOC_FUNC(ssh2_realloc) {
+static void *ssh2_realloc(void *ptr, size_t count, void **abstract) {
   (void)abstract;
   void *p = heap_caps_realloc_prefer(ptr, count, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
   if (!p && count) {
@@ -75,7 +75,7 @@ static LIBSSH2_REALLOC_FUNC(ssh2_realloc) {
   return p;
 }
 
-static LIBSSH2_FREE_FUNC(ssh2_free) {
+static void ssh2_free(void *ptr, void **abstract) {
   (void)abstract;
   heap_caps_free(ptr);
 }
