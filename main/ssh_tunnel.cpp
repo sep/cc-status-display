@@ -17,6 +17,7 @@
 #include "sdkconfig.h"
 
 #include <esp_event.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_timer.h>
@@ -37,6 +38,48 @@
 
 static const char *TAG = "ssh-tunnel";
 
+// ----------------------------------------------------------------------------
+// Heap visibility. "session_init failed" on hardware told us nothing; this
+// logs the shape of the heap at the interesting moments, and the custom
+// allocator below reports the exact size of any request libssh2 makes that
+// fails. PSRAM is preferred when the board has it (Lonely Binary N16R8:
+// 8 MB; SparkFun Thing Plus: none) so libssh2's session/channel/kex buffers
+// don't compete with Wi-Fi, lwIP and the HUB75 DMA buffers for internal RAM.
+// ----------------------------------------------------------------------------
+
+static void log_heap(const char *where) {
+  ESP_LOGI(TAG, "heap @%s: free=%u largest=%u internal=%u spiram=%u", where,
+           (unsigned)esp_get_free_heap_size(),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
+
+static LIBSSH2_ALLOC_FUNC(ssh2_alloc) {
+  (void)abstract;
+  void *p = heap_caps_malloc_prefer(count, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+  if (!p) {
+    ESP_LOGE(TAG, "libssh2 alloc(%u) FAILED", (unsigned)count);
+    log_heap("alloc-fail");
+  }
+  return p;
+}
+
+static LIBSSH2_REALLOC_FUNC(ssh2_realloc) {
+  (void)abstract;
+  void *p = heap_caps_realloc_prefer(ptr, count, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+  if (!p && count) {
+    ESP_LOGE(TAG, "libssh2 realloc(%u) FAILED", (unsigned)count);
+    log_heap("realloc-fail");
+  }
+  return p;
+}
+
+static LIBSSH2_FREE_FUNC(ssh2_free) {
+  (void)abstract;
+  heap_caps_free(ptr);
+}
+
 // Device identity, embedded by main/CMakeLists.txt (EMBED_TXTFILES appends a
 // NUL, so usable length is end - start - 1). Empty placeholders when the
 // files are absent → "no key embedded" at runtime.
@@ -55,6 +98,8 @@ static constexpr EventBits_t WIFI_CONNECTED_BIT = BIT0;
 static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+    ESP_LOGI(TAG, "wifi associated; waiting for a DHCP lease");
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_wifi_eg, WIFI_CONNECTED_BIT);
     ESP_LOGW(TAG, "wifi disconnected; reconnecting");
@@ -235,9 +280,10 @@ static bool session_up() {
   s_sock = tcp_connect(CONFIG_CC_SSH_HOST, CONFIG_CC_SSH_PORT);
   if (s_sock < 0) return false;
 
-  s_session = libssh2_session_init();
+  log_heap("before-session");
+  s_session = libssh2_session_init_ex(ssh2_alloc, ssh2_free, ssh2_realloc, nullptr);
   if (!s_session) {
-    ESP_LOGE(TAG, "libssh2_session_init failed (out of memory?)");
+    ESP_LOGE(TAG, "libssh2_session_init failed (see alloc log above)");
     teardown();
     return false;
   }
@@ -294,6 +340,9 @@ static bool session_up() {
     return false;
   }
   ESP_LOGI(TAG, "remote forward listening on %s:localhost:%d", CONFIG_CC_SSH_HOST, bound);
+  log_heap("listening");
+  ESP_LOGI(TAG, "ssh task stack high-water mark: %u bytes free of %d",
+           (unsigned)uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t), CONFIG_CC_SSH_TASK_STACK);
 
   libssh2_session_set_blocking(s_session, 0);
   s_connected = true;
@@ -391,7 +440,10 @@ static bool service_once() {
 [[maybe_unused]] static void ssh_task(void *) {
   libssh2_init(0);
   for (;;) {
-    xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+    while (!(xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE,
+                                  pdMS_TO_TICKS(15000)) & WIFI_CONNECTED_BIT)) {
+      ESP_LOGW(TAG, "still no IP address; if this persists, check the AP's DHCP lease table for this MAC");
+    }
     ESP_LOGI(TAG, "connecting %s@%s:%d", CONFIG_CC_SSH_USER, CONFIG_CC_SSH_HOST, CONFIG_CC_SSH_PORT);
     if (session_up()) {
       while (service_once()) {
@@ -414,7 +466,11 @@ static bool service_once() {
 void ssh_tunnel_start(SshLineHandler handler) {
 #ifdef CONFIG_CC_SSH_ENABLE
   s_handler = handler;
+  log_heap("boot");
   wifi_start();
+  uint8_t mac[6] = {0};
+  if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK)
+    ESP_LOGI(TAG, "sta mac %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   if (xTaskCreate(ssh_task, "ssh_tunnel", CONFIG_CC_SSH_TASK_STACK, nullptr, 4, nullptr) != pdPASS) {
     ESP_LOGE(TAG, "failed to create ssh task (stack %d bytes)", CONFIG_CC_SSH_TASK_STACK);
   }
