@@ -266,12 +266,20 @@ int main(int argc, char **argv)
         printf("host key SHA256 (hex) %s\n", hex);
     }
 
-    if (libssh2_userauth_publickey_frommemory(g_session, user, strlen(user),
-                                              pub, publen, priv, privlen, NULL) != 0) {
-        fprintf(stderr, "publickey auth failed: %s\n", last_error());
+    /* FWTEST_FROMFILE=1 switches to the from-file API, which is what
+       libssh2's own test-suite uses; the firmware uses from-memory. */
+    int auth_rc;
+    if (getenv("FWTEST_FROMFILE"))
+        auth_rc = libssh2_userauth_publickey_fromfile(g_session, user, argv[4], argv[5], NULL);
+    else
+        auth_rc = libssh2_userauth_publickey_frommemory(g_session, user, strlen(user),
+                                                        pub, publen, priv, privlen, NULL);
+    if (auth_rc != 0) {
+        fprintf(stderr, "publickey auth failed (%s): %s\n",
+                getenv("FWTEST_FROMFILE") ? "fromfile" : "frommemory", last_error());
         return 1;
     }
-    printf("authenticated as %s\n", user);
+    printf("authenticated as %s (%s)\n", user, getenv("FWTEST_FROMFILE") ? "fromfile" : "frommemory");
 
     libssh2_keepalive_config(g_session, 1, 15);
 

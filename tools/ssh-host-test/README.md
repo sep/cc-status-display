@@ -30,6 +30,37 @@ gcc -O1 -Wall -o fwtest "$(git rev-parse --show-toplevel)"/tools/ssh-host-test/f
     b-libssh2/src/libssh2.a $S/prefix/lib/libmbedcrypto.a $S/prefix/lib/libtfpsacrypto.a $S/prefix/lib/libmbedcrypto.a
 ```
 
+## Key format matters (read before generating a key)
+
+libssh2's mbedTLS backend — upstream and the fork alike — has **no reader for
+RSA private keys in the OpenSSH container format** (`-----BEGIN OPENSSH PRIVATE
+KEY-----`, the default output of `ssh-keygen` since OpenSSH 7.8). Such a key
+parses as a *public* key fine, so the server accepts it, and then auth dies
+inside the signing callback with the unhelpful:
+
+```
+publickey auth failed: Callback returned error
+```
+
+Verified 2026-11-05 against mbedTLS 4.2.0 with the fork, and confirmed as a
+pre-existing limitation (1.11.1 has the same gap; the harness test for it is
+compiled out on mbedTLS). What works:
+
+| Key | `-----BEGIN EC PRIVATE KEY-----` / `RSA PRIVATE KEY` (`-m PEM`) | `OPENSSH PRIVATE KEY` (default) |
+|---|---|---|
+| ECDSA P-256 | ✅ | ✅ |
+| RSA | ✅ | ❌ "Callback returned error" |
+| ed25519 | ❌ (backend has no ed25519) | ❌ |
+
+So: `ssh-keygen -t ecdsa -b 256 -m PEM`, exactly as below. If you already
+have a key, `head -1` it; an OpenSSH-format RSA key can be converted in place
+with `ssh-keygen -p -m PEM -f <key>` (empty old/new passphrase).
+
+`FWTEST_FROMFILE=1` switches `fwtest` to the from-file auth API (what
+libssh2's own tests use) if you ever need to split a key problem from a
+from-memory problem; `FWTEST_TRACE=1` prints libssh2's auth trace when the
+library was built with `-DENABLE_DEBUG_LOGGING=ON`.
+
 ## Run against your real VM (closest to the firmware's situation)
 
 ```sh
