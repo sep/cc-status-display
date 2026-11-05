@@ -36,7 +36,8 @@ account somewhere both things can reach".
 ## ESP-IDF version and libssh2 provenance
 
 The branch builds on **ESP-IDF v6.0** (the repo's pin) with libssh2 from
-<https://github.com/mike-rogers/libssh2> branch `mbedtls-4-psa`: upstream
+<https://github.com/mike-rogers/libssh2> branch `mbedtls-4-psa` (pinned at
+`3ae9b73`, 2026-11-05): upstream
 master plus a PSA-based backend for mbedTLS 4 / TF-PSA-Crypto. History of
 how we got here, each step confirmed by a CI run on this branch:
 
@@ -58,7 +59,10 @@ libssh2's mbedTLS backend does **RSA and ECDSA, not ed25519** — for both
 the device identity and the server host key it will accept. OpenSSH
 servers offer ECDSA and RSA host keys by default alongside ed25519, so
 nothing to change server-side; just don't generate the device key as
-ed25519.
+ed25519. Generate it **without `-m PEM`**: the backend reads OpenSSH-format
+ECDSA keys everywhere, whereas `-m PEM` on macOS emits explicit-parameter
+EC keys that mbedTLS rejects, and OpenSSH-format RSA keys aren't readable
+at all. Full matrix in `tools/ssh-host-test/README.md`.
 
 ## Server setup (once)
 
@@ -97,7 +101,7 @@ ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub
 ```sh
 # in the firmware checkout — key is gitignored and embedded at build time
 mkdir -p main/keys
-ssh-keygen -t ecdsa -b 256 -m PEM -f main/keys/id_ecdsa -N "" -C claudepanel-esp32
+ssh-keygen -t ecdsa -b 256 -f main/keys/id_ecdsa -N "" -C claudepanel-esp32   # no -m PEM: see tools/ssh-host-test/README.md
 cat main/keys/id_ecdsa.pub     # → paste into authorized_keys (line 1 above)
 
 idf.py set-target esp32s3

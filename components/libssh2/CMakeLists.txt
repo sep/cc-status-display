@@ -8,7 +8,8 @@
 # mike-rogers/libssh2 branch `mbedtls-4-psa` (upstream master + a PSA-based
 # mbedTLS 4 backend). Move it back to upstream once that work is merged and
 # released. To bump: `git -C components/libssh2/libssh2 checkout <sha>` and
-# commit the pointer.
+# commit the pointer. NOTE: that branch has been force-pushed before; always
+# re-pin to a hash that exists on the branch head's history.
 set(_ssh2 "${CMAKE_CURRENT_SOURCE_DIR}/libssh2")
 
 # src/Makefile.inc CSOURCES minus the openssl / libgcrypt / wincng / os400
