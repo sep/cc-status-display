@@ -134,7 +134,10 @@ static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
   ESP_ERROR_CHECK(esp_wifi_start());
-  ESP_LOGI(TAG, "wifi: joining '%s'", CONFIG_CC_WIFI_SSID);
+  // Mains-powered display: no reason to modem-sleep, and power save on
+  // some APs makes the station miss DHCP replies for minutes at a time.
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  ESP_LOGI(TAG, "wifi: joining '%s' (power save off)", CONFIG_CC_WIFI_SSID);
 }
 
 // ----------------------------------------------------------------------------
@@ -467,6 +470,15 @@ void ssh_tunnel_start(SshLineHandler handler) {
 #ifdef CONFIG_CC_SSH_ENABLE
   s_handler = handler;
   log_heap("boot");
+#ifdef CONFIG_SPIRAM
+  if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
+    ESP_LOGW(TAG, "built with PSRAM support but no PSRAM pool found. Stale sdkconfig? "
+                  "(`idf.py fullclean`, rebuild) — or the module's PSRAM isn't octal. "
+                  "libssh2 needs ~80 KB contiguous; internal RAM alone may not have it.");
+  }
+#else
+  ESP_LOGW(TAG, "built WITHOUT PSRAM support; libssh2 needs ~80 KB contiguous RAM");
+#endif
   wifi_start();
   uint8_t mac[6] = {0};
   if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK)
