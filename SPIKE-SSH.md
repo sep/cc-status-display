@@ -166,6 +166,27 @@ configuration (algorithm availability may differ from a desktop build),
 memory with the HUB75 driver running, Wi-Fi, and keepalive behaviour over
 hours.
 
+## First hardware run (2026-11-05) and the memory budget
+
+Observed on an ESP32-S3 on the SEP-IoT VLAN: association in < 1 s, **DHCP
+lease after ~116 s** (the firmware was silent meanwhile; it now logs every
+15 s while waiting, plus the STA MAC so the lease table can be checked),
+TCP connect to the VM fine, then `libssh2_session_init()` returned NULL.
+
+Cause: `LIBSSH2_SESSION` is ~80 KB in a single allocation (`buf[35000]`,
+`outbuf[35000]`, `banner[8192]` — the SSH protocol requires handling
+35 KB packets, so these aren't tunable). After Wi-Fi, lwIP, the HUB75 DMA
+buffers and the 48 KB SSH task stack, internal RAM has no contiguous hole
+that size.
+
+Fix on the branch: PSRAM enabled in `sdkconfig.defaults` (octal, matching
+the Lonely Binary N16R8; ignored if absent) and libssh2 given an allocator
+that prefers PSRAM and logs any failed request's size with the heap shape.
+Also logged now: heap at boot / before session / after the listener binds,
+and the SSH task's stack high-water mark, so the 48 KB stack can be trimmed
+with data. **A board without PSRAM may not be able to run this feature at
+all**; the heap log will say.
+
 ## Success criteria
 
 - [x] Builds for both boards on ESP-IDF v6.0 with the fork's mbedTLS 4 backend

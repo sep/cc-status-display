@@ -15,3 +15,21 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# SSH tunnel spike: libssh2's session struct is ~80 KB in ONE allocation
+# (two 35 KB packet buffers + an 8 KB banner buffer, sizes the SSH protocol
+# mandates). Internal RAM rarely has a contiguous hole that big once Wi-Fi,
+# lwIP, the HUB75 DMA buffers and the SSH task stack are up, so the first
+# hardware run died in libssh2_session_init(). Enable PSRAM; ssh_tunnel.cpp
+# hands libssh2 an allocator that prefers it. Octal mode matches the Lonely
+# Binary N16R8; IGNORE_NOTFOUND keeps boards without (octal) PSRAM booting,
+# they just fall back to internal RAM and may hit the same wall.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# Also let Wi-Fi/lwIP take their big buffers from PSRAM, freeing internal RAM
+# for everything that must stay there (DMA, task stacks).
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
