@@ -110,7 +110,7 @@ idf.py set-target esp32s3
 # `idf.py fullclean` first if you've built before.
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" menuconfig
 #   → ClaudePanel SSH tunnel (spike): enable, SSID, PSK, host, user
-idf.py build -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD flash monitor
+idf.py -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD build flash monitor   # -D before the verb
 ```
 
 Boot log to expect:

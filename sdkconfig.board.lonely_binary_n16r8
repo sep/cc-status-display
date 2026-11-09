@@ -1,5 +1,5 @@
 # Lonely Binary ESP32-S3 N16R8 Gold Edition: ESP32-S3-WROOM-1-N16R8,
 # 16 MB flash, 8 MB OCTAL PSRAM. Use with sdkconfig.defaults:
 #   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" \
-#          build -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD
+#          -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD build
 CONFIG_SPIRAM_MODE_OCT=y

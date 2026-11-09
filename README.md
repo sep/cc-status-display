@@ -76,7 +76,7 @@ idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.thing_plus" buil
 
 # Lonely Binary N16R8:
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" \
-       build -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD flash monitor
+       -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD build flash monitor
 ```
 
 The `BOARD_NAME` macros are defined in [`main/board_config.h`](main/board_config.h).

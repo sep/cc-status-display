@@ -56,7 +56,7 @@ jobs:
           esp_idf_version: v6.0
           target: esp32s3
           path: '.'
-          command: idf.py -DSDKCONFIG_DEFAULTS="${{ matrix.board.cfg }}" build -DBOARD_NAME=${{ matrix.board.macro }}
+          command: idf.py -DSDKCONFIG_DEFAULTS="${{ matrix.board.cfg }}" -DBOARD_NAME=${{ matrix.board.macro }} build
 
       - name: Stage binaries
         run: |

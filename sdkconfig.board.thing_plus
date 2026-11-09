@@ -2,5 +2,5 @@
 # 4 MB flash, 2 MB QUAD PSRAM (in-package, ESP32-S3FH4R2). Use with
 # sdkconfig.defaults:
 #   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.thing_plus" \
-#          build -DBOARD_NAME=BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+#          -DBOARD_NAME=BOARD_SPARKFUN_THING_PLUS_ESP32_S3 build
 CONFIG_SPIRAM_MODE_QUAD=y
