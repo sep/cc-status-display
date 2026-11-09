@@ -1,11 +1,11 @@
 # Spike: SSH remote-forward tunnel (multi-bridge, no direct connectivity)
 
-**Status: spike.** Proves that the ESP32 can hold an SSH session to a
-server, request a remote port forward, and accept several bridges through
-it — each as its own channel, each getting its own replies. If this works
-on hardware, the remaining work is productisation (NVS-stored identity,
-`provision` message, bridge-side transport); if it doesn't, we learn that
-before touching the bridge.
+**Status: spike — thesis proven on hardware (2026-11-10).** An ESP32-S3
+(Lonely Binary N16R8) held an SSH session to the VM, bound a remote forward,
+and served two laptops through it simultaneously, each as its own channel
+with its own pong replies. What remains is productisation (NVS-stored
+identity, `provision` message, bridge-side transport) plus the open checklist
+items below.
 
 ## Why
 
@@ -221,7 +221,8 @@ defaults (the first hardware run had PSRAM "enabled" and `spiram=0`).
       app partition free. (On v5.5 / mbedTLS 3.6 it had been ≈920 KB vs ≈446 KB.)
 - [x] Session comes up, listener binds (hardware, Lonely Binary N16R8, 2026-11-09;
       a bridge-side ping came back as a pong through the tunnel). Idle-survival not yet timed.
-- [ ] Two concurrent connections, pongs don't cross-talk. *(Proven on host with `fwtest`; not yet tried on the board.)*
+- [x] Two concurrent connections, pongs don't cross-talk — **on hardware** (board as owner, two laptops via
+      `ssh -L`, 2026-11-10). Also proven on host with `fwtest`.
 - [ ] Session recovers after `sudo systemctl restart ssh` on the VM and after a Wi-Fi drop.
 - [x] Free heap after connect: `heap @listening: internal=109971 spiram=8289628` on the N16R8 —
       the libssh2 session lives in PSRAM; internal RAM barely moved from boot.
