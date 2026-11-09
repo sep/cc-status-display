@@ -21,11 +21,13 @@ CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 # mandates). Internal RAM rarely has a contiguous hole that big once Wi-Fi,
 # lwIP, the HUB75 DMA buffers and the SSH task stack are up, so the first
 # hardware run died in libssh2_session_init(). Enable PSRAM; ssh_tunnel.cpp
-# hands libssh2 an allocator that prefers it. Octal mode matches the Lonely
-# Binary N16R8; IGNORE_NOTFOUND keeps boards without (octal) PSRAM booting,
-# they just fall back to internal RAM and may hit the same wall.
+# hands libssh2 an allocator that prefers it. The PSRAM *mode* is per board
+# (sdkconfig.board.*: octal for the Lonely Binary N16R8, quad for the
+# SparkFun Thing Plus's ESP32-S3-MINI-1-N4R2) and must be passed alongside
+# this file:  idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.<board>"
+# IGNORE_NOTFOUND keeps a board booting if the mode is wrong or PSRAM is
+# absent; it then falls back to internal RAM and may hit the same wall.
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_TYPE_AUTO=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y

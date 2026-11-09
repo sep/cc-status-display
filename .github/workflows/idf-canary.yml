@@ -77,4 +77,5 @@ jobs:
           esp_idf_version: ${{ needs.detect.outputs.latest }}
           target: esp32s3
           path: '.'
-          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }}
+          # sdkconfig.board.<id> carries the board's PSRAM mode; see sdkconfig.defaults.
+          command: idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.${{ matrix.board.id }}" build -DBOARD_NAME=${{ matrix.board.macro }}

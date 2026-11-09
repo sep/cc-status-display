@@ -65,12 +65,18 @@ fit together), see the [plugin repo's README][plugin].
 You'll need [ESP-IDF v6.0](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32s3/get-started/) installed, exported into your shell, and a supported board plugged in.
 
 ```sh
-# Default build is for the SparkFun Thing Plus.
+# Each board needs its PSRAM-mode overlay alongside sdkconfig.defaults
+# (quad on the Thing Plus, octal on the Lonely Binary). SDKCONFIG_DEFAULTS
+# is only read when sdkconfig is (re)generated, so run `idf.py fullclean`
+# when switching boards or after the defaults change.
 idf.py set-target esp32s3
-idf.py build flash monitor
 
-# To target a different board:
-idf.py build -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD flash monitor
+# SparkFun Thing Plus (the default BOARD_NAME):
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.thing_plus" build flash monitor
+
+# Lonely Binary N16R8:
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" \
+       build -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD flash monitor
 ```
 
 The `BOARD_NAME` macros are defined in [`main/board_config.h`](main/board_config.h).

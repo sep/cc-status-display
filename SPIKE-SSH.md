@@ -105,8 +105,12 @@ ssh-keygen -t ecdsa -b 256 -f main/keys/id_ecdsa -N "" -C claudepanel-esp32   # 
 cat main/keys/id_ecdsa.pub     # → paste into authorized_keys (line 1 above)
 
 idf.py set-target esp32s3
-idf.py menuconfig              # ClaudePanel SSH tunnel (spike) → enable, SSID, PSK, host, user
-idf.py build flash monitor     # add -DBOARD_NAME=... for the Lonely Binary
+# pick the board's overlay (PSRAM mode): sdkconfig.board.thing_plus or
+# sdkconfig.board.lonely_binary_n16r8. Only read when sdkconfig is generated —
+# `idf.py fullclean` first if you've built before.
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" menuconfig
+#   → ClaudePanel SSH tunnel (spike): enable, SSID, PSK, host, user
+idf.py build -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD flash monitor
 ```
 
 Boot log to expect:
@@ -179,13 +183,21 @@ Cause: `LIBSSH2_SESSION` is ~80 KB in a single allocation (`buf[35000]`,
 buffers and the 48 KB SSH task stack, internal RAM has no contiguous hole
 that size.
 
-Fix on the branch: PSRAM enabled in `sdkconfig.defaults` (octal, matching
-the Lonely Binary N16R8; ignored if absent) and libssh2 given an allocator
+Fix on the branch: PSRAM enabled in `sdkconfig.defaults` with the mode in a
+per-board overlay — `sdkconfig.board.lonely_binary_n16r8` (8 MB octal) and
+`sdkconfig.board.thing_plus` (the Thing Plus's ESP32-S3-MINI-1-N4R2 has
+2 MB **quad** PSRAM, so this is *not* a Lonely-Binary-only feature) — and
+libssh2 given an allocator
 that prefers PSRAM and logs any failed request's size with the heap shape.
 Also logged now: heap at boot / before session / after the listener binds,
 and the SSH task's stack high-water mark, so the 48 KB stack can be trimmed
 with data. **A board without PSRAM may not be able to run this feature at
-all**; the heap log will say.
+all**; the heap log will say. Neither supported board is in that position.
+
+Gotcha that cost a day: `SDKCONFIG_DEFAULTS` is only consulted when
+`sdkconfig` is generated. An existing `sdkconfig` silently ignores new
+defaults (the first hardware run had PSRAM "enabled" and `spiram=0`).
+`idf.py fullclean` after pulling defaults changes or switching boards.
 
 ## Success criteria
 

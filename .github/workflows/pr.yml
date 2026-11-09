@@ -33,15 +33,19 @@ jobs:
       fail-fast: false
       matrix:
         board:
+          # cfg = sdkconfig.defaults plus the board's PSRAM-mode overlay
+          # (octal on the N16R8, quad on the Thing Plus's MINI-1-N4R2).
           - id: thing_plus
             macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
+            cfg: "sdkconfig.defaults;sdkconfig.board.thing_plus"
           - id: lonely_binary_n16r8
             macro: BOARD_LONELY_BINARY_N16R8_GOLD
+            cfg: "sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8"
           # SPIKE ONLY: same board with the SSH tunnel compiled in, so the
           # link is exercised and the image size is real. Not released.
           - id: thing_plus_ssh
             macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
-            extra: -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci-ssh"
+            cfg: "sdkconfig.defaults;sdkconfig.board.thing_plus;sdkconfig.ci-ssh"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -52,7 +56,7 @@ jobs:
           esp_idf_version: v6.0
           target: esp32s3
           path: '.'
-          command: idf.py build -DBOARD_NAME=${{ matrix.board.macro }} ${{ matrix.board.extra }}
+          command: idf.py -DSDKCONFIG_DEFAULTS="${{ matrix.board.cfg }}" build -DBOARD_NAME=${{ matrix.board.macro }}
 
       - name: Stage binaries
         run: |
