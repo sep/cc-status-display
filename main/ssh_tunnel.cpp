@@ -344,8 +344,10 @@ static bool session_up() {
   s_listener = libssh2_channel_forward_listen_ex(s_session, "localhost",
                                                  CONFIG_CC_SSH_LISTEN_PORT, &bound, MAX_CLIENTS);
   if (!s_listener) {
-    ESP_LOGE(TAG, "remote forward on localhost:%d refused: %s "
-                  "(check permitlisten= in authorized_keys / AllowTcpForwarding)",
+    ESP_LOGE(TAG, "remote forward on localhost:%d refused: %s — usually the port is "
+                  "already held by another session (a previous instance of this device "
+                  "that dropped off Wi-Fi? set ClientAliveInterval on the server), else "
+                  "check permitlisten= in authorized_keys / AllowTcpForwarding",
              CONFIG_CC_SSH_LISTEN_PORT, last_error());
     teardown();
     return false;

@@ -286,7 +286,11 @@ int main(int argc, char **argv)
     int bound = 0;
     g_listener = libssh2_channel_forward_listen_ex(g_session, "localhost", listen_port, &bound, MAX_CLIENTS);
     if (!g_listener) {
-        fprintf(stderr, "forward_listen failed: %s\n", last_error());
+        fprintf(stderr, "forward_listen failed: %s\n"
+                        "  (sshd refused the request: most often localhost:%d is already held by "
+                        "another session — a running or half-dead ESP32? `ss -ltnp | grep %d` on "
+                        "the server. Otherwise check permitlisten= / AllowTcpForwarding.)\n",
+                last_error(), listen_port, listen_port);
         return 1;
     }
     printf("remote forward listening on localhost:%d\n", bound);

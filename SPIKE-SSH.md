@@ -75,7 +75,19 @@ sudo -u claudepanel chmod 700 ~claudepanel/.ssh
 
 `/etc/ssh/sshd_config` defaults are fine (`AllowTcpForwarding yes`,
 `GatewayPorts no`). If the VM's sshd was hardened, make sure forwarding is
-allowed for this user. Optional but nice: `ClientAliveInterval 30`.
+allowed for this user. **Not optional:**
+
+```
+ClientAliveInterval 30
+ClientAliveCountMax 3
+```
+
+A remote forward is a listener and sshd allows one per port. When the ESP32
+drops off Wi-Fi without closing its session, sshd otherwise keeps the dead
+session — and the port — until TCP gives up, which can be hours; every new
+connection then fails with "Unable to complete request for forward-listen".
+With ClientAlive the port frees within ~90 s. To see who holds it:
+`ss -ltnp | grep 7777`.
 
 `~claudepanel/.ssh/authorized_keys` gets one line per device, restricted
 to exactly the forwarding it needs:
