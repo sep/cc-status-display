@@ -98,12 +98,20 @@ static constexpr EventBits_t WIFI_CONNECTED_BIT = BIT0;
 static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
-  } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
-    ESP_LOGI(TAG, "wifi associated; waiting for a DHCP lease");
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_wifi_eg, WIFI_CONNECTED_BIT);
-    ESP_LOGW(TAG, "wifi disconnected; reconnecting");
+    // The reason code is the single most useful RF-debugging datum: e.g.
+    // 200 BEACON_TIMEOUT / 201 NO_AP_FOUND (weak or detuned antenna),
+    // 15 4WAY_HANDSHAKE_TIMEOUT (uplink frames lost / wrong PSK),
+    // 2 AUTH_EXPIRE, 8 ASSOC_LEAVE. Full table: esp_wifi_types.h.
+    const auto *e = static_cast<wifi_event_sta_disconnected_t *>(data);
+    ESP_LOGW(TAG, "wifi disconnected: reason %d, rssi %d; reconnecting", (int)e->reason, (int)e->rssi);
     esp_wifi_connect();
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+      ESP_LOGI(TAG, "wifi associated: rssi %d dBm, channel %d, phy %s%s%s; waiting for a DHCP lease",
+               (int)ap.rssi, (int)ap.primary, ap.phy_11b ? "b" : "", ap.phy_11g ? "g" : "", ap.phy_11n ? "n" : "");
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     const auto *e = static_cast<ip_event_got_ip_t *>(data);
     ESP_LOGI(TAG, "wifi up, ip " IPSTR, IP2STR(&e->ip_info.ip));
