@@ -431,7 +431,19 @@ static bool service_once() {
     }
   }
 
-  // 4) Sleep until the socket has something, or 100 ms, whichever first.
+  // 4) While bridges are connected, re-check the stack high-water mark once
+  //    a minute — the reply path (handle_line → send_pong) runs on this task
+  //    and is the deepest thing it does. Guards the 16 KB default.
+  static int64_t s_last_hwm_log = 0;
+  const int64_t now = esp_timer_get_time();
+  if (s_nclients > 0 && now - s_last_hwm_log > 60LL * 1000 * 1000) {
+    s_last_hwm_log = now;
+    ESP_LOGI(TAG, "ssh task stack high-water mark: %u bytes free of %d (%d client%s)",
+             (unsigned)uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t),
+             CONFIG_CC_SSH_TASK_STACK, (int)s_nclients, s_nclients == 1 ? "" : "s");
+  }
+
+  // 5) Sleep until the socket has something, or 100 ms, whichever first.
   fd_set rf;
   FD_ZERO(&rf);
   FD_SET(s_sock, &rf);

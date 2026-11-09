@@ -49,11 +49,15 @@ menu "ClaudePanel SSH tunnel (spike)"
 
     config CC_SSH_TASK_STACK
         int "SSH task stack size (bytes)"
-        range 16384 131072
-        default 49152
+        range 8192 131072
+        default 16384
         help
-            libssh2 + mbedTLS key exchange is stack-hungry; the upstream
-            libssh2_esp example floors this at 50000.
+            Measured on hardware (N16R8, mbedTLS 4 / PSA, 2026-11-09): the
+            handshake + auth + forward_listen path left 45544 of 49152 bytes
+            untouched, i.e. < 4 KB used. The pong/reply path that runs on
+            this task adds ~4 KB (same as the serial task's budget). 16 KB
+            is a 2x margin; the firmware logs the high-water mark while
+            clients are connected so the number keeps being checked.
 
     config CC_SSH_RECONNECT_MS
         int "Reconnect delay after a failed or dropped session (ms)"

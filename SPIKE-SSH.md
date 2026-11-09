@@ -205,10 +205,12 @@ defaults (the first hardware run had PSRAM "enabled" and `spiram=0`).
       (CI run 6, 2026-11-03; zero warnings from libssh2). Image 0xddab0 (≈887 KB)
       with the tunnel linked in vs 0x66cd0 (≈421 KB) without; 71 % of the 3 MB
       app partition free. (On v5.5 / mbedTLS 3.6 it had been ≈920 KB vs ≈446 KB.)
-- [ ] Session comes up, listener binds, survives 10+ minutes idle (keepalive).
-- [ ] Two concurrent connections, pongs don't cross-talk. *(Proven on host with `fwtest`; re-confirm on the board.)*
+- [x] Session comes up, listener binds (hardware, Lonely Binary N16R8, 2026-11-09;
+      a bridge-side ping came back as a pong through the tunnel). Idle-survival not yet timed.
+- [ ] Two concurrent connections, pongs don't cross-talk. *(Proven on host with `fwtest`; not yet tried on the board.)*
 - [ ] Session recovers after `sudo systemctl restart ssh` on the VM and after a Wi-Fi drop.
-- [ ] Free heap after connect is comfortable (`esp_get_free_heap_size()` ≳ 100 KB with HUB75 running).
+- [x] Free heap after connect: `heap @listening: internal=109971 spiram=8289628` on the N16R8 —
+      the libssh2 session lives in PSRAM; internal RAM barely moved from boot.
 - [ ] USB serial path still works unchanged.
 
 ## Known gaps (by design, for the spike)
@@ -218,5 +220,7 @@ defaults (the first hardware run had PSRAM "enabled" and `spiram=0`).
 - `configure` sent by two bridges with different layouts will fight; last writer wins. Decide: NVS wins over the tunnel, or require matching `panel_layout.json`.
 - Cross-bridge slot collisions aren't flagged. The firmware now knows which channel each line came from, so it *can* — later.
 - Spontaneous (non-reply) device→host messages would need broadcasting to every channel; nothing emits them today.
-- Stack size (48 KB) copied from upstream's example floor; tune down once real high-water marks are known.
+- Stack size: measured high-water mark on hardware was 45544 free of 49152 after handshake/auth/listen
+  (< 4 KB used). Default trimmed to 16 KB; the firmware logs the mark once a minute while clients are
+  connected. Thing Plus (2 MB quad PSRAM) still untested on hardware.
 - libssh2 comes from a personal fork branch until the mbedTLS 4 backend is upstreamed and released; see "ESP-IDF version and libssh2 provenance".
