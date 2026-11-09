@@ -87,7 +87,9 @@ drops off Wi-Fi without closing its session, sshd otherwise keeps the dead
 session — and the port — until TCP gives up, which can be hours; every new
 connection then fails with "Unable to complete request for forward-listen".
 With ClientAlive the port frees within ~90 s. To see who holds it:
-`ss -ltnp | grep 7777`.
+`ss -ltnp | grep 7777` (Linux) or `sockstat -4 -l | grep 7777` (FreeBSD);
+`kill` that sshd child to free it at once. Reload sshd after editing the
+config (`systemctl reload ssh` / `service sshd reload`).
 
 `~claudepanel/.ssh/authorized_keys` gets one line per device, restricted
 to exactly the forwarding it needs:
