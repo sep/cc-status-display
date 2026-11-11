@@ -1,6 +1,12 @@
 # Spike: SSH remote-forward tunnel (multi-bridge, no direct connectivity)
 
-**Status: spike — thesis proven on hardware (2026-11-10).** An ESP32-S3
+**Status: SPIKE CLOSED 2026-11-11 — thesis proven on hardware; productisation next.**
+Hardware note: the PCB-antenna DevKitC clone could not hold the link from a
+normal desk position in a metal-heavy office; an ESP32-S3-DevKitC-1U-N16R8
+(same module, u.FL socket, external dipole) fixed it outright with no
+firmware change. Recommend the 1U variant for any remote install.
+
+**Original status line:** An ESP32-S3
 (Lonely Binary N16R8) held an SSH session to the VM, bound a remote forward,
 and served two laptops through it simultaneously, each as its own channel
 with its own pong replies. What remains is productisation (NVS-stored
