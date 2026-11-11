@@ -93,13 +93,16 @@ extern const char s_pub_end[]    asm("_binary_id_ecdsa_pub_end");
 // ----------------------------------------------------------------------------
 
 static EventGroupHandle_t s_wifi_eg = nullptr;
+static volatile TunnelWifi s_wifi_state = TunnelWifi::Off;
 static constexpr EventBits_t WIFI_CONNECTED_BIT = BIT0;
 
 static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+    s_wifi_state = TunnelWifi::Down;
     esp_wifi_connect();
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_wifi_eg, WIFI_CONNECTED_BIT);
+    s_wifi_state = TunnelWifi::Down;
     // The reason code is the single most useful RF-debugging datum: e.g.
     // 200 BEACON_TIMEOUT / 201 NO_AP_FOUND (weak or detuned antenna),
     // 15 4WAY_HANDSHAKE_TIMEOUT (uplink frames lost / wrong PSK),
@@ -108,6 +111,7 @@ static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *
     ESP_LOGW(TAG, "wifi disconnected: reason %d, rssi %d; reconnecting", (int)e->reason, (int)e->rssi);
     esp_wifi_connect();
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+    s_wifi_state = TunnelWifi::Associated;
     wifi_ap_record_t ap = {};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
       ESP_LOGI(TAG, "wifi associated: rssi %d dBm, channel %d, phy %s%s%s; waiting for a DHCP lease",
@@ -115,6 +119,7 @@ static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     const auto *e = static_cast<ip_event_got_ip_t *>(data);
     ESP_LOGI(TAG, "wifi up, ip " IPSTR, IP2STR(&e->ip_info.ip));
+    s_wifi_state = TunnelWifi::Up;
     xEventGroupSetBits(s_wifi_eg, WIFI_CONNECTED_BIT);
   }
 }
@@ -532,4 +537,5 @@ bool ssh_tunnel_write(SshClient *client, const char *buf, size_t n) {
 }
 
 bool ssh_tunnel_is_connected() { return s_connected; }
+TunnelWifi ssh_tunnel_wifi_state() { return s_wifi_state; }
 int  ssh_tunnel_client_count() { return s_nclients; }

@@ -162,8 +162,11 @@ Open a second tunnel from the other laptop (or a second terminal) and
 send `{"client":"2",...}` — it should drive panel 2 independently and
 its pings should get pongs on its own connection only.
 
-The bottom-left status row: pixel 2 = bridge heartbeat (existing), pixel
-4 = tunnel link (blue up / purple down).
+The bottom-left status row, left to right: x=2 bridge heartbeat (existing:
+green = a line arrived in the last 10 s, over either transport), x=4 Wi-Fi
+(green = IP acquired, amber = associated but no DHCP lease, red = down),
+x=6 SSH (blue = listener bound, purple = connecting/retrying). The two
+remote pixels are off when the tunnel is disabled.
 
 ## Host-side functional test of the SSH path (2026-11-03)
 

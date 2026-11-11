@@ -33,5 +33,9 @@ bool ssh_tunnel_write(SshClient *client, const char *buf, size_t n);
 // True while the SSH session is up and the remote listener is bound.
 bool ssh_tunnel_is_connected();
 
+// Wi-Fi station state, for the status pixels.
+enum class TunnelWifi { Off, Down, Associated, Up };
+TunnelWifi ssh_tunnel_wifi_state();
+
 // Number of bridges currently connected through the tunnel.
 int ssh_tunnel_client_count();

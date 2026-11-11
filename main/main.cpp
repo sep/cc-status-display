@@ -1243,10 +1243,23 @@ static void render_conn_dot(Hub75Driver &d, int64_t now_us) {
   if (fresh) put_pixel(d,2, h - 2, 0, 80, 16);
   else       put_pixel(d,2, h - 2, 80, 8, 0);
 #ifdef CONFIG_CC_SSH_ENABLE
-  // SSH tunnel link, one pixel right of the heartbeat dot: blue while the
-  // session + remote listener are up, dim purple while (re)connecting.
-  if (ssh_tunnel_is_connected()) put_pixel(d, 4, h - 2, 0, 16, 80);
-  else                           put_pixel(d, 4, h - 2, 40, 0, 40);
+  // Remote-link status row, continuing rightward from the heartbeat dot
+  // (x=2 bridge rx). Two more pixels, two columns apart so they read as
+  // separate dots at P2.5 pitch:
+  //   x=4 Wi-Fi : green = IP acquired, amber = associated but no lease yet,
+  //               red = down; off when the tunnel is disabled.
+  //   x=6 SSH   : blue = session up + remote listener bound,
+  //               purple = connecting / retrying; off when disabled.
+  switch (ssh_tunnel_wifi_state()) {
+    case TunnelWifi::Up:         put_pixel(d, 4, h - 2, 0, 80, 16);  break;
+    case TunnelWifi::Associated: put_pixel(d, 4, h - 2, 80, 48, 0);  break;
+    case TunnelWifi::Down:       put_pixel(d, 4, h - 2, 80, 8, 0);   break;
+    case TunnelWifi::Off:        break;
+  }
+  if (ssh_tunnel_wifi_state() != TunnelWifi::Off) {
+    if (ssh_tunnel_is_connected()) put_pixel(d, 6, h - 2, 0, 16, 80);
+    else                           put_pixel(d, 6, h - 2, 40, 0, 40);
+  }
 #endif
 }
 
