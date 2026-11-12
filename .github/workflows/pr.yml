@@ -41,11 +41,6 @@ jobs:
           - id: lonely_binary_n16r8
             macro: BOARD_LONELY_BINARY_N16R8_GOLD
             cfg: "sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8"
-          # SPIKE ONLY: same board with the SSH tunnel compiled in, so the
-          # link is exercised and the image size is real. Not released.
-          - id: thing_plus_ssh
-            macro: BOARD_SPARKFUN_THING_PLUS_ESP32_S3
-            cfg: "sdkconfig.defaults;sdkconfig.board.thing_plus;sdkconfig.ci-ssh"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:

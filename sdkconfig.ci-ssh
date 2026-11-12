@@ -1,7 +1,0 @@
-# CI-only overlay (spike): compile + link the SSH tunnel so the build proves
-# every libssh2 / Wi-Fi symbol resolves and reports the real image size.
-# Placeholder credentials — this image is never meant to be flashed.
-CONFIG_CC_SSH_ENABLE=y
-CONFIG_CC_WIFI_SSID="ci-placeholder"
-CONFIG_CC_WIFI_PASSWORD="ci-placeholder"
-CONFIG_CC_SSH_HOST="ssh.invalid"

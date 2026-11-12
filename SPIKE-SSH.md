@@ -116,37 +116,24 @@ Note the server's host-key fingerprint for pinning later:
 ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub
 ```
 
-## Device setup
+## Device setup (wire v1.4: provisioned over USB, nothing compiled in)
+
+Flash the firmware (the remote link is compiled in by default and idle until
+provisioned), then over the USB serial channel — `nc`, `cat`/`echo` on
+`/dev/ttyACM0`, or the bridge's provisioning dialog once it exists — run the
+recipe in the bridge repo's `FIRMWARE.md` §8 "Remote link over SSH (v1.4)":
+`keygen` → paste the `authorized_keys_line` on the server → `provision` with
+Wi-Fi + server settings and `"enabled":true` → read the `hostkey_seen` event
+→ `pin_hostkey` → `tunnel_status` says `listening`.
+
+Build per board (the overlay carries the PSRAM mode; `idf.py fullclean`
+first if you've built before):
 
 ```sh
-# in the firmware checkout — key is gitignored and embedded at build time
-mkdir -p main/keys
-ssh-keygen -t ecdsa -b 256 -f main/keys/id_ecdsa -N "" -C claudepanel-esp32   # no -m PEM: see tools/ssh-host-test/README.md
-cat main/keys/id_ecdsa.pub     # → paste into authorized_keys (line 1 above)
-
 idf.py set-target esp32s3
-# pick the board's overlay (PSRAM mode): sdkconfig.board.thing_plus or
-# sdkconfig.board.lonely_binary_n16r8. Only read when sdkconfig is generated —
-# `idf.py fullclean` first if you've built before.
-idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" menuconfig
-#   → ClaudePanel SSH tunnel (spike): enable, SSID, PSK, host, user
-idf.py -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD build flash monitor   # -D before the verb
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.board.lonely_binary_n16r8" \
+       -DBOARD_NAME=BOARD_LONELY_BINARY_N16R8_GOLD build flash monitor
 ```
-
-Boot log to expect:
-
-```
-ssh-tunnel: wifi: joining '...'
-ssh-tunnel: wifi up, ip 192.168.x.y
-ssh-tunnel: connecting claudepanel@vm:22
-ssh-tunnel: server host key SHA256:....
-ssh-tunnel: host key not pinned (spike): accepting. Set CC_SSH_HOSTKEY_SHA256 to pin it.
-ssh-tunnel: authenticated as 'claudepanel'
-ssh-tunnel: remote forward listening on vm:localhost:7777
-```
-
-Once you've compared the fingerprint with the server's, put it in
-`CC_SSH_HOSTKEY_SHA256` and rebuild; mismatches then refuse to auth.
 
 ## Laptop test (no bridge changes needed)
 
@@ -239,8 +226,7 @@ defaults (the first hardware run had PSRAM "enabled" and `spiram=0`).
 
 ## Known gaps (by design, for the spike)
 
-- Identity and config are compile-time (Kconfig + embedded key). Production: NVS + a `provision` NDJSON message pushed from the bridge over USB, which also reads back the public key.
-- Host key is trust-on-first-use unless pinned. Production: pin via the same provision flow.
+- Identity and config: now NVS + `provision`/`keygen`/`pin_hostkey` over USB (v1.4). Bridge dialog pending.
 - `configure` sent by two bridges with different layouts will fight; last writer wins. Decide: NVS wins over the tunnel, or require matching `panel_layout.json`.
 - Cross-bridge slot collisions aren't flagged. The firmware now knows which channel each line came from, so it *can* — later.
 - Spontaneous (non-reply) device→host messages would need broadcasting to every channel; nothing emits them today.

@@ -14,11 +14,13 @@
 // ============================================================================
 
 #include "ssh_tunnel.h"
+#include "remote_link.h"
 #include "sdkconfig.h"
 
 #include <esp_event.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_mac.h>
 #include <esp_netif.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
@@ -37,6 +39,32 @@
 #include <cstring>
 
 static const char *TAG = "ssh-tunnel";
+
+const char *tunnel_wifi_name(TunnelWifi s) {
+  switch (s) {
+    case TunnelWifi::Off:        return "off";
+    case TunnelWifi::Down:       return "down";
+    case TunnelWifi::Associated: return "associated";
+    case TunnelWifi::Up:         return "up";
+  }
+  return "?";
+}
+
+const char *tunnel_ssh_name(TunnelSsh s) {
+  switch (s) {
+    case TunnelSsh::Off:             return "off";
+    case TunnelSsh::WaitingWifi:     return "waiting_wifi";
+    case TunnelSsh::Connecting:      return "connecting";
+    case TunnelSsh::HostkeyMismatch: return "hostkey_mismatch";
+    case TunnelSsh::AuthFailed:      return "auth_failed";
+    case TunnelSsh::ForwardRefused:  return "forward_refused";
+    case TunnelSsh::Listening:       return "listening";
+    case TunnelSsh::Down:            return "down";
+  }
+  return "?";
+}
+
+#ifdef CONFIG_CC_REMOTE_LINK
 
 // ----------------------------------------------------------------------------
 // Heap visibility. "session_init failed" on hardware told us nothing; this
@@ -80,13 +108,22 @@ static void ssh2_free(void *ptr, void **abstract) {
   heap_caps_free(ptr);
 }
 
-// Device identity, embedded by main/CMakeLists.txt (EMBED_TXTFILES appends a
-// NUL, so usable length is end - start - 1). Empty placeholders when the
-// files are absent → "no key embedded" at runtime.
-extern const char s_priv_start[] asm("_binary_id_ecdsa_start");
-extern const char s_priv_end[]   asm("_binary_id_ecdsa_end");
-extern const char s_pub_start[]  asm("_binary_id_ecdsa_pub_start");
-extern const char s_pub_end[]    asm("_binary_id_ecdsa_pub_end");
+// ----------------------------------------------------------------------------
+// Runtime state exposed to tunnel_status / the status pixels
+// ----------------------------------------------------------------------------
+
+static volatile TunnelSsh s_ssh_state      = TunnelSsh::Off;
+static volatile uint32_t  s_cfg_gen        = 0;      // bumped by ssh_tunnel_apply_config()
+static char               s_last_error[96] = {0};
+static char               s_ip[16]         = {0};
+static char               s_hostkey_fp[64] = {0};
+static volatile int       s_hostkey_match  = -1;
+static SshEventSink       s_events         = nullptr;
+
+static void set_error(const char *msg) {
+  strncpy(s_last_error, msg ? msg : "", sizeof(s_last_error) - 1);
+  s_last_error[sizeof(s_last_error) - 1] = '\0';
+}
 
 // ----------------------------------------------------------------------------
 // Wi-Fi station
@@ -94,6 +131,7 @@ extern const char s_pub_end[]    asm("_binary_id_ecdsa_pub_end");
 
 static EventGroupHandle_t s_wifi_eg = nullptr;
 static volatile TunnelWifi s_wifi_state = TunnelWifi::Off;
+static volatile bool       s_wifi_started = false;
 static constexpr EventBits_t WIFI_CONNECTED_BIT = BIT0;
 
 static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *data) {
@@ -108,8 +146,13 @@ static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *
     // 15 4WAY_HANDSHAKE_TIMEOUT (uplink frames lost / wrong PSK),
     // 2 AUTH_EXPIRE, 8 ASSOC_LEAVE. Full table: esp_wifi_types.h.
     const auto *e = static_cast<wifi_event_sta_disconnected_t *>(data);
-    ESP_LOGW(TAG, "wifi disconnected: reason %d, rssi %d; reconnecting", (int)e->reason, (int)e->rssi);
-    esp_wifi_connect();
+    s_ip[0] = '\0';
+    if (s_wifi_started) {
+      ESP_LOGW(TAG, "wifi disconnected: reason %d, rssi %d; reconnecting", (int)e->reason, (int)e->rssi);
+      esp_wifi_connect();
+    } else {
+      s_wifi_state = TunnelWifi::Off;
+    }
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
     s_wifi_state = TunnelWifi::Associated;
     wifi_ap_record_t ap = {};
@@ -119,38 +162,56 @@ static void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     const auto *e = static_cast<ip_event_got_ip_t *>(data);
     ESP_LOGI(TAG, "wifi up, ip " IPSTR, IP2STR(&e->ip_info.ip));
+    snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&e->ip_info.ip));
     s_wifi_state = TunnelWifi::Up;
     xEventGroupSetBits(s_wifi_eg, WIFI_CONNECTED_BIT);
   }
 }
 
-[[maybe_unused]] static void wifi_start() {
+static void wifi_init_once() {
   s_wifi_eg = xEventGroupCreate();
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   esp_netif_create_default_wifi_sta();
-
   wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&init_cfg));
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
       WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr, nullptr));
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
       IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, nullptr, nullptr));
-
-  wifi_config_t wc = {};
-  strncpy(reinterpret_cast<char *>(wc.sta.ssid), CONFIG_CC_WIFI_SSID, sizeof(wc.sta.ssid) - 1);
-  strncpy(reinterpret_cast<char *>(wc.sta.password), CONFIG_CC_WIFI_PASSWORD,
-          sizeof(wc.sta.password) - 1);
-  wc.sta.threshold.authmode =
-      (strlen(CONFIG_CC_WIFI_PASSWORD) > 0) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+}
+
+// Bring the station in line with the stored config: join, re-join with new
+// credentials, or leave. Safe from any task (esp_wifi_* are thread-safe).
+static void wifi_apply(const RemoteLinkConfig &cfg) {
+  if (!cfg.enabled || !cfg.wifi_complete()) {
+    if (s_wifi_started) {
+      s_wifi_started = false;
+      esp_wifi_disconnect();
+      esp_wifi_stop();
+      ESP_LOGI(TAG, "wifi: stopped (link disabled or no SSID)");
+    }
+    s_wifi_state = TunnelWifi::Off;
+    xEventGroupClearBits(s_wifi_eg, WIFI_CONNECTED_BIT);
+    return;
+  }
+  wifi_config_t wc = {};
+  strncpy(reinterpret_cast<char *>(wc.sta.ssid), cfg.ssid, sizeof(wc.sta.ssid) - 1);
+  strncpy(reinterpret_cast<char *>(wc.sta.password), cfg.psk, sizeof(wc.sta.password) - 1);
+  wc.sta.threshold.authmode = cfg.psk[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
-  ESP_ERROR_CHECK(esp_wifi_start());
-  // Mains-powered display: no reason to modem-sleep, and power save on
-  // some APs makes the station miss DHCP replies for minutes at a time.
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  ESP_LOGI(TAG, "wifi: joining '%s' (power save off)", CONFIG_CC_WIFI_SSID);
+  if (!s_wifi_started) {
+    s_wifi_started = true;
+    ESP_ERROR_CHECK(esp_wifi_start());
+    // Mains-powered display: no reason to modem-sleep, and power save on
+    // some APs makes the station miss DHCP replies for minutes at a time.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    ESP_LOGI(TAG, "wifi: joining '%s' (power save off)", cfg.ssid);
+  } else {
+    ESP_LOGI(TAG, "wifi: re-joining '%s' with new settings", cfg.ssid);
+    esp_wifi_disconnect();  // handler reconnects with the new config
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -285,21 +346,17 @@ static void teardown() {
 
 // Bring a session all the way up to "listener bound, non-blocking". On any
 // failure the partial state is torn down and false is returned.
-static bool session_up() {
-  const size_t privlen = static_cast<size_t>(s_priv_end - s_priv_start) - 1;
-  const size_t publen  = static_cast<size_t>(s_pub_end - s_pub_start) - 1;
-  if (privlen == 0 || publen == 0) {
-    ESP_LOGE(TAG, "no key embedded — create main/keys/id_ecdsa(.pub) and rebuild (see SPIKE-SSH.md)");
-    return false;
-  }
-
-  s_sock = tcp_connect(CONFIG_CC_SSH_HOST, CONFIG_CC_SSH_PORT);
-  if (s_sock < 0) return false;
+static bool session_up(const RemoteLinkConfig &cfg) {
+  s_ssh_state = TunnelSsh::Connecting;
+  s_sock = tcp_connect(cfg.host, cfg.port);
+  if (s_sock < 0) { set_error("tcp connect failed"); s_ssh_state = TunnelSsh::Down; return false; }
 
   log_heap("before-session");
   s_session = libssh2_session_init_ex(ssh2_alloc, ssh2_free, ssh2_realloc, nullptr);
   if (!s_session) {
     ESP_LOGE(TAG, "libssh2_session_init failed (see alloc log above)");
+    set_error("session alloc failed");
+    s_ssh_state = TunnelSsh::Down;
     teardown();
     return false;
   }
@@ -312,34 +369,62 @@ static bool session_up() {
 
   if (libssh2_session_handshake(s_session, s_sock) != 0) {
     ESP_LOGE(TAG, "handshake failed: %s", last_error());
+    set_error(last_error());
+    s_ssh_state = TunnelSsh::Down;
     teardown();
     return false;
   }
 
+  // Host key: record what we saw, tell the host (hostkey_seen), enforce the
+  // pin if there is one.
   const char *hash = libssh2_hostkey_hash(s_session, LIBSSH2_HOSTKEY_HASH_SHA256);
   char fp[48] = {0};
   if (hash) fingerprint_b64(hash, fp, sizeof(fp));
-  ESP_LOGI(TAG, "server host key SHA256:%s", fp);
-  if (strlen(CONFIG_CC_SSH_HOSTKEY_SHA256) > 0) {
-    if (!hash || !fingerprint_matches(fp, CONFIG_CC_SSH_HOSTKEY_SHA256)) {
-      ESP_LOGE(TAG, "HOST KEY MISMATCH — expected %s; refusing to authenticate",
-               CONFIG_CC_SSH_HOSTKEY_SHA256);
-      teardown();
-      return false;
-    }
-  } else {
-    ESP_LOGW(TAG, "host key not pinned (spike): accepting. Set CC_SSH_HOSTKEY_SHA256 to pin it.");
+  snprintf(s_hostkey_fp, sizeof(s_hostkey_fp), "SHA256:%s", fp);
+  const bool pinned = cfg.hostkey_fp[0] != '\0';
+  const bool match  = pinned && hash && fingerprint_matches(fp, cfg.hostkey_fp);
+  s_hostkey_match = pinned ? (match ? 1 : 0) : -1;
+  ESP_LOGI(TAG, "server host key %s (%s)", s_hostkey_fp,
+           pinned ? (match ? "pinned, match" : "PINNED, MISMATCH") : "not pinned");
+  if (s_events) {
+    char ev[256];
+    const char *kt = libssh2_session_methods(s_session, LIBSSH2_METHOD_HOSTKEY);
+    const int n = snprintf(ev, sizeof(ev),
+        "{\"type\":\"hostkey_seen\",\"fingerprint\":\"%s\",\"keytype\":\"%s\","
+        "\"pinned\":%s,\"match\":%s,\"uptime_ms\":%lld}\n",
+        s_hostkey_fp, kt ? kt : "?", pinned ? "true" : "false",
+        pinned ? (match ? "true" : "false") : "null",
+        static_cast<long long>(esp_timer_get_time() / 1000));
+    if (n > 0 && n < static_cast<int>(sizeof(ev))) s_events(ev, static_cast<size_t>(n));
   }
-
-  if (libssh2_userauth_publickey_frommemory(s_session, CONFIG_CC_SSH_USER,
-                                            strlen(CONFIG_CC_SSH_USER),
-                                            s_pub_start, publen,
-                                            s_priv_start, privlen, nullptr) != 0) {
-    ESP_LOGE(TAG, "publickey auth failed for '%s': %s", CONFIG_CC_SSH_USER, last_error());
+  if (pinned && !match) {
+    ESP_LOGE(TAG, "HOST KEY MISMATCH — expected %s; refusing to authenticate", cfg.hostkey_fp);
+    set_error("host key mismatch");
+    s_ssh_state = TunnelSsh::HostkeyMismatch;
     teardown();
     return false;
   }
-  ESP_LOGI(TAG, "authenticated as '%s'", CONFIG_CC_SSH_USER);
+
+  // Identity from NVS. Both halves are handed to libssh2 as text; the public
+  // line is parsed by libssh2 itself, the PEM by the mbedTLS backend.
+  char pem[512];
+  char pub[200];
+  const size_t pemlen = remote_link_key_pem(pem, sizeof(pem));
+  const size_t publen = remote_link_pubkey_line(pub, sizeof(pub));
+  int auth_rc = -1;
+  if (pemlen && publen)
+    auth_rc = libssh2_userauth_publickey_frommemory(s_session, cfg.user, strlen(cfg.user),
+                                                    pub, publen, pem, pemlen, nullptr);
+  memset(pem, 0, sizeof(pem));
+  if (auth_rc != 0) {
+    ESP_LOGE(TAG, "publickey auth failed for '%s': %s", cfg.user,
+             (pemlen && publen) ? last_error() : "no identity stored (send keygen)");
+    set_error((pemlen && publen) ? last_error() : "no identity stored");
+    s_ssh_state = TunnelSsh::AuthFailed;
+    teardown();
+    return false;
+  }
+  ESP_LOGI(TAG, "authenticated as '%s'", cfg.user);
 
   // Server-side keepalive every 15 s with a reply requested, so a dead TCP
   // path surfaces as a send error instead of silence.
@@ -347,22 +432,26 @@ static bool session_up() {
 
   int bound = 0;
   s_listener = libssh2_channel_forward_listen_ex(s_session, "localhost",
-                                                 CONFIG_CC_SSH_LISTEN_PORT, &bound, MAX_CLIENTS);
+                                                 cfg.listen_port, &bound, MAX_CLIENTS);
   if (!s_listener) {
     ESP_LOGE(TAG, "remote forward on localhost:%d refused: %s — usually the port is "
                   "already held by another session (a previous instance of this device "
                   "that dropped off Wi-Fi? set ClientAliveInterval on the server), else "
                   "check permitlisten= in authorized_keys / AllowTcpForwarding",
-             CONFIG_CC_SSH_LISTEN_PORT, last_error());
+             cfg.listen_port, last_error());
+    set_error("forward refused (port in use?)");
+    s_ssh_state = TunnelSsh::ForwardRefused;
     teardown();
     return false;
   }
-  ESP_LOGI(TAG, "remote forward listening on %s:localhost:%d", CONFIG_CC_SSH_HOST, bound);
+  ESP_LOGI(TAG, "remote forward listening on %s:localhost:%d", cfg.host, bound);
   log_heap("listening");
   ESP_LOGI(TAG, "ssh task stack high-water mark: %u bytes free of %d",
            (unsigned)uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t), CONFIG_CC_SSH_TASK_STACK);
 
   libssh2_session_set_blocking(s_session, 0);
+  set_error("");
+  s_ssh_state = TunnelSsh::Listening;
   s_connected = true;
   return true;
 }
@@ -467,24 +556,49 @@ static bool service_once() {
   return true;
 }
 
-[[maybe_unused]] static void ssh_task(void *) {
+static void ssh_task(void *) {
   libssh2_init(0);
   for (;;) {
-    while (!(xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE,
-                                  pdMS_TO_TICKS(15000)) & WIFI_CONNECTED_BIT)) {
-      ESP_LOGW(TAG, "still no IP address; if this persists, check the AP's DHCP lease table for this MAC");
+    const uint32_t gen = s_cfg_gen;
+    RemoteLinkConfig cfg;
+    remote_link_load(cfg);
+    const bool ready = cfg.enabled && cfg.wifi_complete() && cfg.ssh_complete() && remote_link_has_key();
+    if (!ready) {
+      s_ssh_state = TunnelSsh::Off;
+      if (cfg.enabled)
+        ESP_LOGW(TAG, "link enabled but incomplete (%s%s%s) — waiting for provisioning",
+                 cfg.wifi_complete() ? "" : "no wifi; ",
+                 cfg.ssh_complete() ? "" : "no ssh settings; ",
+                 remote_link_has_key() ? "" : "no key");
+      while (gen == s_cfg_gen) vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
     }
-    ESP_LOGI(TAG, "connecting %s@%s:%d", CONFIG_CC_SSH_USER, CONFIG_CC_SSH_HOST, CONFIG_CC_SSH_PORT);
-    if (session_up()) {
-      while (service_once()) {
+
+    s_ssh_state = TunnelSsh::WaitingWifi;
+    int64_t last_nag = esp_timer_get_time();
+    while (gen == s_cfg_gen &&
+           !(xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE,
+                                 pdMS_TO_TICKS(1000)) & WIFI_CONNECTED_BIT)) {
+      if (esp_timer_get_time() - last_nag > 15LL * 1000 * 1000) {
+        last_nag = esp_timer_get_time();
+        ESP_LOGW(TAG, "still no IP address; if this persists, check the AP's DHCP lease table for this MAC");
+      }
+    }
+    if (gen != s_cfg_gen) continue;
+
+    ESP_LOGI(TAG, "connecting %s@%s:%u", cfg.user, cfg.host, cfg.port);
+    if (session_up(cfg)) {
+      while (gen == s_cfg_gen && service_once()) {
         if (!(xEventGroupGetBits(s_wifi_eg) & WIFI_CONNECTED_BIT)) {
           ESP_LOGW(TAG, "wifi dropped; abandoning session");
           break;
         }
       }
       teardown();
+      if (s_ssh_state == TunnelSsh::Listening) s_ssh_state = TunnelSsh::Down;
     }
-    ESP_LOGW(TAG, "session down; retry in %d ms", CONFIG_CC_SSH_RECONNECT_MS);
+    if (gen != s_cfg_gen) { ESP_LOGI(TAG, "reconfigured; restarting link"); continue; }
+    ESP_LOGW(TAG, "session down (%s); retry in %d ms", tunnel_ssh_name(s_ssh_state), CONFIG_CC_SSH_RECONNECT_MS);
     vTaskDelay(pdMS_TO_TICKS(CONFIG_CC_SSH_RECONNECT_MS));
   }
 }
@@ -493,9 +607,9 @@ static bool service_once() {
 // Public API
 // ----------------------------------------------------------------------------
 
-void ssh_tunnel_start(SshLineHandler handler) {
-#ifdef CONFIG_CC_SSH_ENABLE
+void ssh_tunnel_start(SshLineHandler handler, SshEventSink events) {
   s_handler = handler;
+  s_events  = events;
   log_heap("boot");
 #ifdef CONFIG_SPIRAM
   if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
@@ -506,17 +620,28 @@ void ssh_tunnel_start(SshLineHandler handler) {
 #else
   ESP_LOGW(TAG, "built WITHOUT PSRAM support; libssh2 needs ~80 KB contiguous RAM");
 #endif
-  wifi_start();
+  wifi_init_once();
   uint8_t mac[6] = {0};
-  if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK)
-    ESP_LOGI(TAG, "sta mac %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  ESP_LOGI(TAG, "sta mac %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  RemoteLinkConfig cfg;
+  remote_link_load(cfg);
+  ESP_LOGI(TAG, "remote link: %s%s", cfg.enabled ? "enabled" : "disabled",
+           cfg.enabled && !(cfg.wifi_complete() && cfg.ssh_complete() && remote_link_has_key())
+               ? " (incomplete — provision over USB)" : "");
+  wifi_apply(cfg);
+
   if (xTaskCreate(ssh_task, "ssh_tunnel", CONFIG_CC_SSH_TASK_STACK, nullptr, 4, nullptr) != pdPASS) {
     ESP_LOGE(TAG, "failed to create ssh task (stack %d bytes)", CONFIG_CC_SSH_TASK_STACK);
   }
-#else
-  (void)handler;
-  ESP_LOGI(TAG, "disabled (CONFIG_CC_SSH_ENABLE=n)");
-#endif
+}
+
+void ssh_tunnel_apply_config() {
+  RemoteLinkConfig cfg;
+  remote_link_load(cfg);
+  wifi_apply(cfg);
+  s_cfg_gen = s_cfg_gen + 1;   // the tunnel task notices and restarts
 }
 
 bool ssh_tunnel_write(SshClient *client, const char *buf, size_t n) {
@@ -536,6 +661,80 @@ bool ssh_tunnel_write(SshClient *client, const char *buf, size_t n) {
   return true;
 }
 
-bool ssh_tunnel_is_connected() { return s_connected; }
-TunnelWifi ssh_tunnel_wifi_state() { return s_wifi_state; }
-int  ssh_tunnel_client_count() { return s_nclients; }
+bool       ssh_tunnel_is_connected() { return s_connected; }
+TunnelWifi ssh_tunnel_wifi_state()   { return s_wifi_state; }
+TunnelSsh  ssh_tunnel_ssh_state()    { return s_ssh_state; }
+int        ssh_tunnel_client_count() { return s_nclients; }
+
+void ssh_tunnel_status(TunnelStatus &o) {
+  o = TunnelStatus{};
+  o.wifi    = s_wifi_state;
+  o.ssh     = s_ssh_state;
+  o.clients = s_nclients;
+  o.rssi    = 0;
+  if (o.wifi == TunnelWifi::Up || o.wifi == TunnelWifi::Associated) {
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) o.rssi = ap.rssi;
+  }
+  strncpy(o.ip, s_ip, sizeof(o.ip) - 1);
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  snprintf(o.mac, sizeof(o.mac), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  strncpy(o.last_error, s_last_error, sizeof(o.last_error) - 1);
+  strncpy(o.hostkey_fp, s_hostkey_fp, sizeof(o.hostkey_fp) - 1);
+  RemoteLinkConfig cfg;
+  remote_link_load(cfg);
+  o.hostkey_pinned = cfg.hostkey_fp[0] != '\0';
+  o.hostkey_match  = s_hostkey_match;
+}
+
+int ssh_tunnel_json_status(char *out, size_t cap) {
+  TunnelStatus st;
+  ssh_tunnel_status(st);
+  RemoteLinkConfig cfg;
+  remote_link_load(cfg);
+  char ssid[80], host[520], user[80], err[220];
+  json_escape(cfg.ssid, ssid, sizeof(ssid));
+  json_escape(cfg.host, host, sizeof(host));
+  json_escape(cfg.user, user, sizeof(user));
+  json_escape(st.last_error, err, sizeof(err));
+  const bool provisioned = cfg.wifi_complete() && cfg.ssh_complete();
+  const int n = snprintf(out, cap,
+      "{\"type\":\"tunnel_status\","
+      "\"enabled\":%s,\"provisioned\":%s,\"has_key\":%s,\"hostkey_pinned\":%s,"
+      "\"wifi\":{\"state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"rssi\":%d,\"mac\":\"%s\"},"
+      "\"ssh\":{\"state\":\"%s\",\"host\":\"%s\",\"port\":%u,\"user\":\"%s\",\"listen_port\":%u,"
+      "\"clients\":%d,\"hostkey_seen\":\"%s\",\"last_error\":%s%s%s},"
+      "\"uptime_ms\":%lld}\n",
+      cfg.enabled ? "true" : "false", provisioned ? "true" : "false",
+      remote_link_has_key() ? "true" : "false", st.hostkey_pinned ? "true" : "false",
+      tunnel_wifi_name(st.wifi), ssid, st.ip, st.rssi, st.mac,
+      tunnel_ssh_name(st.ssh), host, cfg.port, user, cfg.listen_port,
+      st.clients, st.hostkey_fp,
+      st.last_error[0] ? "\"" : "null", err, st.last_error[0] ? "\"" : "",
+      static_cast<long long>(esp_timer_get_time() / 1000));
+  return (n > 0 && static_cast<size_t>(n) < cap) ? n : 0;
+}
+
+int ssh_tunnel_json_summary(char *out, size_t cap) {
+  const int n = snprintf(out, cap, "\"tunnel\":{\"wifi\":\"%s\",\"ssh\":\"%s\",\"clients\":%d},",
+                         tunnel_wifi_name(s_wifi_state), tunnel_ssh_name(s_ssh_state), (int)s_nclients);
+  return (n > 0 && static_cast<size_t>(n) < cap) ? n : 0;
+}
+
+#else  // !CONFIG_CC_REMOTE_LINK — USB-only build: every entry point is a no-op
+
+void ssh_tunnel_start(SshLineHandler, SshEventSink) {
+  ESP_LOGI(TAG, "remote link not compiled in (CONFIG_CC_REMOTE_LINK=n)");
+}
+void       ssh_tunnel_apply_config() {}
+bool       ssh_tunnel_write(SshClient *, const char *, size_t) { return false; }
+bool       ssh_tunnel_is_connected() { return false; }
+TunnelWifi ssh_tunnel_wifi_state()   { return TunnelWifi::Off; }
+TunnelSsh  ssh_tunnel_ssh_state()    { return TunnelSsh::Off; }
+int        ssh_tunnel_client_count() { return 0; }
+void       ssh_tunnel_status(TunnelStatus &o) { o = TunnelStatus{}; }
+int        ssh_tunnel_json_status(char *, size_t) { return 0; }
+int        ssh_tunnel_json_summary(char *, size_t) { return 0; }
+
+#endif  // CONFIG_CC_REMOTE_LINK

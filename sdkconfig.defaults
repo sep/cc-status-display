@@ -7,7 +7,7 @@ CONFIG_IDF_TARGET="esp32s3"
 # and the spec-mandated channel separation is restored.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
-# SSH tunnel spike: Wi-Fi + mbedTLS + libssh2 won't fit the 1 MB default
+# Remote link: Wi-Fi + mbedTLS + libssh2 won't fit the 1 MB default
 # factory partition. The custom table keeps the app at 0x10000 (so the
 # flasher manifest offsets in scripts/make_manifest.py are unchanged) and
 # grows it to 3 MB. Assumes >= 4 MB flash, which every supported board has.
@@ -16,7 +16,7 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
-# SSH tunnel spike: libssh2's session struct is ~80 KB in ONE allocation
+# Remote link: libssh2's session struct is ~80 KB in ONE allocation
 # (two 35 KB packet buffers + an 8 KB banner buffer, sizes the SSH protocol
 # mandates). Internal RAM rarely has a contiguous hole that big once Wi-Fi,
 # lwIP, the HUB75 DMA buffers and the SSH task stack are up, so the first

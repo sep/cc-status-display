@@ -23,5 +23,3 @@ cmake-build-debug-esp-idf/
 ## Local Claude Code per-project state
 .claude/
 
-## SSH tunnel spike: per-device SSH identity, embedded at build time, never committed
-main/keys/

@@ -30,6 +30,7 @@
 
 #include "board_config.h"
 #include "ssh_tunnel.h"
+#include "remote_link.h"
 #include "sdkconfig.h"
 #include "cJSON.h"
 #include "driver/gpio.h"
@@ -236,13 +237,22 @@ static void format_client_id(uint8_t panel_idx, SlotKind kind, char *out, size_t
 // We hand-roll the JSON to avoid cJSON allocation churn in the hot path.
 // ======================================================================
 
+static SemaphoreHandle_t g_usb_tx_mutex    = nullptr;  // serial task replies vs tunnel-task events
+static SemaphoreHandle_t g_reply_buf_mutex = nullptr;  // static reply buffers: handle_line runs on both ingress tasks
+
+static void usb_write_line(const char *buf, size_t n) {
+  if (g_usb_tx_mutex && xSemaphoreTake(g_usb_tx_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+  usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(50));
+  if (g_usb_tx_mutex) xSemaphoreGive(g_usb_tx_mutex);
+}
+
 static void write_json_line(SshClient *to, const char *buf, int n) {
   if (n <= 0) return;
   if (to) {
     ssh_tunnel_write(to, buf, static_cast<size_t>(n));
     return;
   }
-  usb_serial_jtag_write_bytes(buf, static_cast<size_t>(n), pdMS_TO_TICKS(20));
+  usb_write_line(buf, static_cast<size_t>(n));
 }
 
 static void send_pong(int64_t seq, SshClient *to) {
@@ -259,9 +269,10 @@ static void send_pong(int64_t seq, SshClient *to) {
 
   const int64_t uptime_ms = esp_timer_get_time() / 1000;
   // Static so we don't burn 2 KB of serial_reader_task's stack every ping.
-  // Safe because send_pong only ever runs on that one task — handle_ping
-  // is called from handle_line which is called from serial_reader_task.
+  // handle_line now runs on the serial task AND the tunnel task, so the
+  // buffer is guarded by g_reply_buf_mutex for the build+write window.
   static char buf[2048];
+  if (xSemaphoreTake(g_reply_buf_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
   int n = snprintf(buf, sizeof(buf),
       "{\"type\":\"pong\",\"seq\":%lld,\"panel_count\":%d,\"first_id\":%d,\"clients\":{",
       static_cast<long long>(seq), g_panel_count, g_first_id);
@@ -289,9 +300,14 @@ static void send_pong(int64_t seq, SshClient *to) {
       if (n >= static_cast<int>(sizeof(buf)) - 64) break;  // guardrail
     }
   }
+  n += snprintf(buf + n, sizeof(buf) - n, "},");
+#ifdef CONFIG_CC_REMOTE_LINK
+  n += ssh_tunnel_json_summary(buf + n, sizeof(buf) - n);   // "tunnel":{…},
+#endif
   n += snprintf(buf + n, sizeof(buf) - n,
-      "},\"uptime_ms\":%lld}\n", static_cast<long long>(uptime_ms));
+      "\"uptime_ms\":%lld}\n", static_cast<long long>(uptime_ms));
   write_json_line(to, buf, n);
+  xSemaphoreGive(g_reply_buf_mutex);
 }
 
 static void send_spontaneous_state_for(uint8_t panel_idx, SlotKind kind,
@@ -632,6 +648,156 @@ static void handle_resync(SshClient *to) {
   }
 }
 
+// ======================================================================
+// Remote link provisioning (wire v1.4) — FIRMWARE.md §8 "Remote link over
+// SSH". provision / keygen / pin_hostkey are honoured only over USB: they
+// carry the Wi-Fi PSK and decide which server the device trusts, so
+// physical access is the credential. tunnel_status answers on any transport.
+// ======================================================================
+
+#ifdef CONFIG_CC_REMOTE_LINK
+
+static void reply_provisioned(SshClient *to, bool ok, const char *error) {
+  static char buf[1024];
+  if (xSemaphoreTake(g_reply_buf_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+  const int n = remote_link_json_provisioned(buf, sizeof(buf), ok, error);
+  write_json_line(to, buf, n);
+  xSemaphoreGive(g_reply_buf_mutex);
+}
+
+static bool usb_only(SshClient *to) {
+  if (!to) return true;
+  reply_provisioned(to, false, "usb_only");
+  return false;
+}
+
+static bool copy_str_field(const cJSON *obj, const char *key, char *dst, size_t cap,
+                           size_t min_len, size_t max_len, bool *present) {
+  const cJSON *n = cJSON_GetObjectItemCaseSensitive(obj, key);
+  *present = (n != nullptr);
+  if (!n) return true;                         // absent = unchanged
+  if (!cJSON_IsString(n)) return false;
+  const size_t len = strlen(n->valuestring);
+  if (len < min_len || len > max_len || len >= cap) return false;
+  strcpy(dst, n->valuestring);
+  return true;
+}
+
+static bool copy_port_field(const cJSON *obj, const char *key, uint16_t *dst) {
+  const cJSON *n = cJSON_GetObjectItemCaseSensitive(obj, key);
+  if (!n) return true;
+  if (!cJSON_IsNumber(n)) return false;
+  const double v = cJSON_GetNumberValue(n);
+  if (v < 1 || v > 65535 || v != static_cast<int>(v)) return false;
+  *dst = static_cast<uint16_t>(v);
+  return true;
+}
+
+static void handle_provision(const cJSON *root, SshClient *to) {
+  if (!usb_only(to)) return;
+  RemoteLinkConfig c;
+  remote_link_load(c);
+  bool present;
+
+  const cJSON *wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
+  if (wifi && !cJSON_IsObject(wifi)) { reply_provisioned(to, false, "bad_ssid"); return; }
+  if (wifi) {
+    if (!copy_str_field(wifi, "ssid", c.ssid, sizeof(c.ssid), 1, 32, &present)) { reply_provisioned(to, false, "bad_ssid"); return; }
+    char psk[65];
+    if (!copy_str_field(wifi, "psk", psk, sizeof(psk), 0, 63, &present)) { reply_provisioned(to, false, "bad_psk"); return; }
+    if (present) {
+      const size_t l = strlen(psk);
+      if (l != 0 && l < 8) { reply_provisioned(to, false, "bad_psk"); return; }
+      strcpy(c.psk, psk);
+    }
+  }
+
+  const cJSON *ssh = cJSON_GetObjectItemCaseSensitive(root, "ssh");
+  if (ssh && !cJSON_IsObject(ssh)) { reply_provisioned(to, false, "bad_host"); return; }
+  if (ssh) {
+    if (!copy_str_field(ssh, "host", c.host, sizeof(c.host), 1, 253, &present)) { reply_provisioned(to, false, "bad_host"); return; }
+    if (!copy_port_field(ssh, "port", &c.port))                                 { reply_provisioned(to, false, "bad_port"); return; }
+    if (!copy_str_field(ssh, "user", c.user, sizeof(c.user), 1, 32, &present))  { reply_provisioned(to, false, "bad_user"); return; }
+    if (!copy_port_field(ssh, "listen_port", &c.listen_port))                   { reply_provisioned(to, false, "bad_listen_port"); return; }
+  }
+
+  const cJSON *en = cJSON_GetObjectItemCaseSensitive(root, "enabled");
+  if (en) {
+    if (!cJSON_IsBool(en)) { reply_provisioned(to, false, "bad_enabled"); return; }
+    c.enabled = cJSON_IsTrue(en);
+  }
+
+  if (remote_link_save(c) != ESP_OK) { reply_provisioned(to, false, "nvs_write_failed"); return; }
+  ESP_LOGI(TAG, "provisioned: ssid='%s' ssh=%s@%s:%u listen=%u enabled=%d",
+           c.ssid, c.user, c.host, c.port, c.listen_port, c.enabled);
+  ssh_tunnel_apply_config();
+  reply_provisioned(to, true, nullptr);
+}
+
+static void handle_keygen(const cJSON *root, SshClient *to) {
+  if (!usb_only(to)) return;
+  const cJSON *r = cJSON_GetObjectItemCaseSensitive(root, "replace");
+  const bool replace = cJSON_IsTrue(r);
+  bool generated = false;
+  if (remote_link_keygen(replace, &generated) != ESP_OK) {
+    reply_provisioned(to, false, "keygen_failed");
+    return;
+  }
+  static char buf[1024];
+  if (xSemaphoreTake(g_reply_buf_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+  const int n = remote_link_json_pubkey(buf, sizeof(buf), generated);
+  write_json_line(to, buf, n);
+  xSemaphoreGive(g_reply_buf_mutex);
+  if (generated) ssh_tunnel_apply_config();   // a link waiting on "no key" can start
+}
+
+// Normalise "SHA256:<b64>" / "<b64>" / padded variants to "SHA256:<b64 unpadded>".
+static bool normalise_fingerprint(const char *in, char *out, size_t cap) {
+  if (strncmp(in, "SHA256:", 7) == 0) in += 7;
+  size_t len = strlen(in);
+  while (len > 0 && in[len - 1] == '=') len--;
+  if (len != 43) return false;                 // 32 bytes → 43 unpadded base64 chars
+  for (size_t i = 0; i < len; i++) {
+    const char ch = in[i];
+    const bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                    (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
+    if (!ok) return false;
+  }
+  return snprintf(out, cap, "SHA256:%.*s", static_cast<int>(len), in) < static_cast<int>(cap);
+}
+
+static void handle_pin_hostkey(const cJSON *root, SshClient *to) {
+  if (!usb_only(to)) return;
+  RemoteLinkConfig c;
+  remote_link_load(c);
+  const cJSON *fp = cJSON_GetObjectItemCaseSensitive(root, "fingerprint");
+  if (!fp || cJSON_IsNull(fp)) {
+    c.hostkey_fp[0] = '\0';
+  } else if (!cJSON_IsString(fp) || !normalise_fingerprint(fp->valuestring, c.hostkey_fp, sizeof(c.hostkey_fp))) {
+    reply_provisioned(to, false, "bad_fingerprint");
+    return;
+  }
+  if (remote_link_save(c) != ESP_OK) { reply_provisioned(to, false, "nvs_write_failed"); return; }
+  ESP_LOGI(TAG, "host key pin %s", c.hostkey_fp[0] ? c.hostkey_fp : "cleared");
+  ssh_tunnel_apply_config();
+  reply_provisioned(to, true, nullptr);
+}
+
+static void handle_tunnel_status(SshClient *to) {
+  static char buf[1024];
+  if (xSemaphoreTake(g_reply_buf_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+  const int n = ssh_tunnel_json_status(buf, sizeof(buf));
+  write_json_line(to, buf, n);
+  xSemaphoreGive(g_reply_buf_mutex);
+}
+
+// Unsolicited events from the tunnel task (hostkey_seen) → USB.
+static void remote_link_event_sink(const char *json_line, size_t len) {
+  usb_write_line(json_line, len);
+}
+
+#endif  // CONFIG_CC_REMOTE_LINK
+
 static void handle_line(const char *line, size_t len, SshClient *to) {
   if (len == 0) return;
 
@@ -653,6 +819,16 @@ static void handle_line(const char *line, size_t len, SshClient *to) {
     handle_configure(root, to);
   } else if (strcmp(type_str, "identify") == 0) {
     handle_identify(root);
+#ifdef CONFIG_CC_REMOTE_LINK
+  } else if (strcmp(type_str, "provision") == 0) {
+    handle_provision(root, to);
+  } else if (strcmp(type_str, "keygen") == 0) {
+    handle_keygen(root, to);
+  } else if (strcmp(type_str, "pin_hostkey") == 0) {
+    handle_pin_hostkey(root, to);
+  } else if (strcmp(type_str, "tunnel_status") == 0) {
+    handle_tunnel_status(to);
+#endif
   }
   // Unknown types: ignore for forward compat.
 
@@ -696,7 +872,7 @@ static void serial_reader_task(void *) {
 
 // SSH tunnel ingress — same dispatcher as serial, with replies routed to
 // the originating channel. Runs on the tunnel task (see ssh_tunnel.h).
-static void ssh_line_handler(const char *line, size_t len, SshClient *reply_to) {
+[[maybe_unused]] static void ssh_line_handler(const char *line, size_t len, SshClient *reply_to) {
   g_last_rx_us = esp_timer_get_time();
   handle_line(line, len, reply_to);
 }
@@ -1242,7 +1418,7 @@ static void render_conn_dot(Hub75Driver &d, int64_t now_us) {
   const bool fresh = (last > 0) && (now_us - last < CONN_FRESH_THRESHOLD_US);
   if (fresh) put_pixel(d,2, h - 2, 0, 80, 16);
   else       put_pixel(d,2, h - 2, 80, 8, 0);
-#ifdef CONFIG_CC_SSH_ENABLE
+#ifdef CONFIG_CC_REMOTE_LINK
   // Remote-link status row, continuing rightward from the heartbeat dot
   // (x=2 bridge rx). Two more pixels, two columns apart so they read as
   // separate dots at P2.5 pitch:
@@ -1408,6 +1584,8 @@ extern "C" void app_main() {
 
   g_mutex        = xSemaphoreCreateMutex();
   g_driver_mutex = xSemaphoreCreateMutex();
+  g_usb_tx_mutex    = xSemaphoreCreateMutex();
+  g_reply_buf_mutex = xSemaphoreCreateMutex();
 
   g_driver = new Hub75Driver(build_hub_cfg());
   if (!g_driver->begin()) {
@@ -1418,7 +1596,7 @@ extern "C" void app_main() {
   if (!usb_serial_jtag_is_driver_installed()) {
     usb_serial_jtag_driver_config_t usj = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     usj.rx_buffer_size = 1024;
-    usj.tx_buffer_size = 256;
+    usj.tx_buffer_size = 2048;   // pong + pubkey replies exceed 256 bytes
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj));
   }
 
@@ -1429,9 +1607,11 @@ extern "C" void app_main() {
   xTaskCreate(serial_reader_task, "serial_rx", 6144, nullptr, 5, nullptr);
   xTaskCreate(ack_button_task,    "ack_btn",   3072, nullptr, 4, nullptr);
 
-  // Second ingress: SSH remote-forward tunnel (spike). No-op unless
-  // CONFIG_CC_SSH_ENABLE; see SPIKE-SSH.md.
-  ssh_tunnel_start(ssh_line_handler);
+  // Second ingress: SSH remote-forward tunnel (wire v1.4). Idle until
+  // provisioned over USB; see FIRMWARE.md §8 "Remote link over SSH".
+#ifdef CONFIG_CC_REMOTE_LINK
+  ssh_tunnel_start(ssh_line_handler, remote_link_event_sink);
+#endif
 
   ESP_ERROR_CHECK(esp_task_wdt_add(nullptr));
 
