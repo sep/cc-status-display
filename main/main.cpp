@@ -743,6 +743,9 @@ static void handle_keygen(const cJSON *root, SshClient *to) {
     reply_provisioned(to, false, "keygen_failed");
     return;
   }
+  ESP_LOGI(TAG, "keygen: %s; stack high-water mark %u bytes free",
+           generated ? "generated" : "existing key returned",
+           (unsigned)uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t));
   static char buf[1024];
   if (xSemaphoreTake(g_reply_buf_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
   const int n = remote_link_json_pubkey(buf, sizeof(buf), generated);
@@ -1601,11 +1604,12 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj));
   }
 
-  // 6 KB stack: handle_ping → send_pong's worst-case frame is ~3.5 KB
-  // (large local pong buffer + snapshot of g_clients + serial_reader's own
-  // line/chunk buffers). 4 KB was right at the edge and overflowed under
-  // the v1.2 full-table pong format.
-  xTaskCreate(serial_reader_task, "serial_rx", 6144, nullptr, 5, nullptr);
+  // 16 KB stack. 6 KB was sized for the pong path and was "right at the
+  // edge"; wire v1.4 runs keygen on this task (PSA ECC key generation +
+  // mbedTLS PEM writer), which overflowed it on first hardware use and
+  // corrupted the USB driver's tx mutex (assert in xQueueSemaphoreTake).
+  // handle_keygen logs the high-water mark so this can be trimmed with data.
+  xTaskCreate(serial_reader_task, "serial_rx", 16384, nullptr, 5, nullptr);
   xTaskCreate(ack_button_task,    "ack_btn",   3072, nullptr, 4, nullptr);
 
   // Second ingress: SSH remote-forward tunnel (wire v1.4). Idle until
