@@ -856,10 +856,11 @@ static void serial_reader_task(void *) {
     g_last_rx_us = esp_timer_get_time();
     for (int i = 0; i < n; i++) {
       const char c = static_cast<char>(chunk[i]);
-      if (c == '\r') continue;
-      if (c == '\n') {
+      // CR or LF ends a line, so a human in `screen`/`minicom` can press
+      // Enter (which sends CR). Empty lines are ignored, so CRLF is fine.
+      if (c == '\r' || c == '\n') {
         line[len] = '\0';
-        handle_line(line, len, nullptr);
+        if (len > 0) handle_line(line, len, nullptr);
         len = 0;
       } else if (len < LINE_BUF_MAX - 1) {
         line[len++] = c;

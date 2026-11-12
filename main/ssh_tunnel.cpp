@@ -459,10 +459,9 @@ static bool session_up(const RemoteLinkConfig &cfg) {
 static void feed_bytes(SshClient &c, const char *buf, ssize_t n) {
   for (ssize_t i = 0; i < n; i++) {
     const char ch = buf[i];
-    if (ch == '\r') continue;
-    if (ch == '\n') {
+    if (ch == '\r' || ch == '\n') {
       c.line[c.len] = '\0';
-      if (s_handler) s_handler(c.line, c.len, &c);
+      if (c.len > 0 && s_handler) s_handler(c.line, c.len, &c);
       c.len = 0;
     } else if (c.len < SSH_LINE_MAX - 1) {
       c.line[c.len++] = ch;
